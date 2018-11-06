@@ -2733,6 +2733,7 @@ func Convert_core_ConfigMapVolumeSource_To_v1_ConfigMapVolumeSource(in *core.Con
 func autoConvert_v1_Container_To_core_Container(in *v1.Container, out *core.Container, s conversion.Scope) error {
 	out.Name = in.Name
 	out.Image = in.Image
+	out.ImageDecryptSecrets = *(*[]core.LocalObjectReference)(unsafe.Pointer(&in.ImageDecryptSecrets))
 	out.Command = *(*[]string)(unsafe.Pointer(&in.Command))
 	out.Args = *(*[]string)(unsafe.Pointer(&in.Args))
 	out.WorkingDir = in.WorkingDir
@@ -2773,6 +2774,7 @@ func Convert_v1_Container_To_core_Container(in *v1.Container, out *core.Containe
 func autoConvert_core_Container_To_v1_Container(in *core.Container, out *v1.Container, s conversion.Scope) error {
 	out.Name = in.Name
 	out.Image = in.Image
+	out.ImageDecryptSecrets = *(*[]v1.LocalObjectReference)(unsafe.Pointer(&in.ImageDecryptSecrets))
 	out.Command = *(*[]string)(unsafe.Pointer(&in.Command))
 	out.Args = *(*[]string)(unsafe.Pointer(&in.Args))
 	out.WorkingDir = in.WorkingDir
