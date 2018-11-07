@@ -36,6 +36,7 @@ func NewCmdCreateSecret(f cmdutil.Factory, ioStreams genericclioptions.IOStreams
 		Run:   cmdutil.DefaultSubCommandRun(ioStreams.ErrOut),
 	}
 	cmd.AddCommand(NewCmdCreateSecretDockerRegistry(f, ioStreams))
+	cmd.AddCommand(NewCmdCreateSecretDecryptImage(f, ioStreams))
 	cmd.AddCommand(NewCmdCreateSecretTLS(f, ioStreams))
 	cmd.AddCommand(NewCmdCreateSecretGeneric(f, ioStreams))
 
@@ -134,6 +135,101 @@ func (o *SecretGenericOpts) Complete(f cmdutil.Factory, cmd *cobra.Command, args
 
 // CreateSecretGeneric is the implementation of the create secret generic command
 func (o *SecretGenericOpts) Run() error {
+	return o.CreateSubcommandOptions.Run()
+}
+
+var (
+	secretForImageDecryptionLong = templates.LongDesc(i18n.T(`
+		Create a new secret for decrypting encrypted images.
+
+		blah blah blah talk about how images are encrypted and what are the private keys
+		that are needed to decrypt those images`))
+
+	secretForImageDecryptionExample = templates.Examples(i18n.T(`
+		  # If you don't already have a .dockercfg file, you can create a dockercfg secret directly by using:
+		  kubectl create secret image-decrypt <secret name> --decrypt-secret=<private key>[:<password>]`))
+)
+
+type SecretImageDecryptionOpts struct {
+	CreateSubcommandOptions *CreateSubcommandOptions
+}
+
+// NewCmdCreateSecretDecryptImage is a macro command for creating secrets to decrypt an encrypted image
+func NewCmdCreateSecretDecryptImage(f cmdutil.Factory, ioStreams genericclioptions.IOStreams) *cobra.Command {
+	options := &SecretImageDecryptionOpts{
+		CreateSubcommandOptions: NewCreateSubcommandOptions(ioStreams),
+	}
+
+	cmd := &cobra.Command{
+		Use:                   "image-decrypt NAME --decrypt-secret=<private key>[:<password>]",
+		DisableFlagsInUseLine: true,
+		Short:                 i18n.T("Create a secret to decrypt an encrypted image"),
+		Long:                  secretForImageDecryptionLong,
+		Example:               secretForImageDecryptionExample,
+		Run: func(cmd *cobra.Command, args []string) {
+			cmdutil.CheckErr(options.Complete(f, cmd, args))
+			cmdutil.CheckErr(options.Run())
+		},
+	}
+
+	options.CreateSubcommandOptions.PrintFlags.AddFlags(cmd)
+
+	cmdutil.AddApplyAnnotationFlags(cmd)
+	cmdutil.AddValidateFlags(cmd)
+	cmdutil.AddGeneratorFlags(cmd, generateversioned.SecretForImageDecryptionV1GeneratorName)
+	cmd.Flags().StringArray("decrypt-secret", []string{}, i18n.T("Private Key (optionally a password) for image decryption"))
+	cmd.MarkFlagRequired("decrypt-secret")
+	// cmd.Flags().String("docker-username", "", i18n.T("Username for Docker registry authentication"))
+	// cmd.MarkFlagRequired("docker-username")
+	// cmd.Flags().String("docker-password", "", i18n.T("Password for Docker registry authentication"))
+	// cmd.MarkFlagRequired("docker-password")
+	// cmd.Flags().String("docker-email", "", i18n.T("Email for Docker registry"))
+	// cmd.Flags().String("docker-server", "https://index.docker.io/v1/", i18n.T("Server location for Docker registry"))
+	cmd.Flags().Bool("append-hash", false, "Append a hash of the secret to its name.")
+	// cmd.Flags().StringSlice("from-file", []string{}, "Key files can be specified using their file path, in which case a default name will be given to them, or optionally with a name and file path, in which case the given name will be used.  Specifying a directory will iterate each named file in the directory that is a valid secret key.")
+
+	return cmd
+}
+
+func (o *SecretImageDecryptionOpts) Complete(f cmdutil.Factory, cmd *cobra.Command, args []string) error {
+	name, err := NameFromCommandArgs(cmd, args)
+	if err != nil {
+		return err
+	}
+
+	// fromFileFlag := cmdutil.GetFlagStringSlice(cmd, "from-file")
+	// if len(fromFileFlag) == 0 {
+	// 	requiredFlags := []string{"docker-username", "docker-password", "docker-server"}
+	// 	for _, requiredFlag := range requiredFlags {
+	// 		if value := cmdutil.GetFlagString(cmd, requiredFlag); len(value) == 0 {
+	// 			return cmdutil.UsageErrorf(cmd, "flag %s is required", requiredFlag)
+	// 		}
+	// 	}
+	// }
+
+	var generator generate.StructuredGenerator
+	switch generatorName := cmdutil.GetFlagString(cmd, "generator"); generatorName {
+	case generateversioned.SecretForImageDecryptionV1GeneratorName:
+		keyPasswds := cmdutil.GetFlagStringArray(cmd, "decrypt-secret")
+		generator = &generateversioned.SecretForDecryptImageGeneratorV1{
+			Name:              name,
+			PrivateKeyPasswds: keyPasswds,
+			// Username:    cmdutil.GetFlagString(cmd, "docker-username"),
+			// Email:       cmdutil.GetFlagString(cmd, "docker-email"),
+			// Password: cmdutil.GetFlagString(cmd, "docker-password"),
+			// Server:      cmdutil.GetFlagString(cmd, "docker-server"),
+			AppendHash: cmdutil.GetFlagBool(cmd, "append-hash"),
+			//FileSources: cmdutil.GetFlagStringSlice(cmd, "from-file"),
+		}
+	default:
+		return errUnsupportedGenerator(cmd, generatorName)
+	}
+
+	return o.CreateSubcommandOptions.Complete(f, cmd, args, generator)
+}
+
+// CreateSecretDockerRegistry is the implementation of the create secret docker-registry command
+func (o *SecretImageDecryptionOpts) Run() error {
 	return o.CreateSubcommandOptions.Run()
 }
 

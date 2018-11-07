@@ -3626,6 +3626,14 @@ type ServiceList struct {
 	Items []Service `json:"items" protobuf:"bytes,2,rep,name=items"`
 }
 
+// ImageDecryptServiceSecret abc
+type ImageDecryptServiceSecret struct {
+	// Required.
+	Name string `json:"name,omitempty" protobuf:"bytes,1,opt,name=name"`
+	// Required.
+	Images []string `json:"images,omitempty" protobuf:"bytes,8,rep,name=images"`
+}
+
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
@@ -3653,6 +3661,13 @@ type ServiceAccount struct {
 	// More info: https://kubernetes.io/docs/concepts/containers/images/#specifying-imagepullsecrets-on-a-pod
 	// +optional
 	ImagePullSecrets []LocalObjectReference `json:"imagePullSecrets,omitempty" protobuf:"bytes,3,rep,name=imagePullSecrets"`
+
+	// ImageDecryptSecrets is a list of references to secrets in the same namespace to use for pulling any images
+	// in pods that reference this ServiceAccount. ImagePullSecrets are distinct from Secrets because Secrets
+	// can be mounted in the pod, but ImagePullSecrets are only accessed by the kubelet.
+	// More info: https://kubernetes.io/docs/concepts/containers/images/#specifying-imagepullsecrets-on-a-pod
+	// +optional
+	ImageDecryptSecrets []ImageDecryptServiceSecret `json:"imageDecryptSecrets,omitempty" protobuf:"bytes,5,rep,name=imageDecryptSecrets"`
 
 	// AutomountServiceAccountToken indicates whether pods running as this service account should have an API token automatically mounted.
 	// Can be overridden at the pod level.
@@ -4970,6 +4985,11 @@ const (
 	// - Secret.Data[".dockerconfigjson"] - a serialized ~/.docker/config.json file
 	SecretTypeDockerConfigJson SecretType = "kubernetes.io/dockerconfigjson"
 
+	// SecretTypeDecryptKeys abc
+	SecretTypeDecryptKey SecretType = "kubernetes.io/decryptionkey"
+
+	// ImageDecryptionKeys abc
+	ImageDecryptionKey = ".imagedecryptionkey"
 	// DockerConfigJsonKey is the key of the required data for SecretTypeDockerConfigJson secrets
 	DockerConfigJsonKey = ".dockerconfigjson"
 

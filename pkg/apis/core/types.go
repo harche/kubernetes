@@ -3240,6 +3240,14 @@ type Service struct {
 	Status ServiceStatus
 }
 
+// ImageDecryptServiceSecret abc
+type ImageDecryptServiceSecret struct {
+	// Required.
+	Name string
+	// Required.
+	Images []string
+}
+
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
@@ -3260,6 +3268,12 @@ type ServiceAccount struct {
 	// can be mounted in the pod, but ImagePullSecrets are only accessed by the kubelet.
 	// +optional
 	ImagePullSecrets []LocalObjectReference
+
+	// ImageDecryptSecrets is a list of references to secrets in the same namespace to use for pulling any images
+	// in pods that reference this ServiceAccount.  ImagePullSecrets are distinct from Secrets because Secrets
+	// can be mounted in the pod, but ImagePullSecrets are only accessed by the kubelet.
+	// +optional
+	ImageDecryptSecrets []ImageDecryptServiceSecret
 
 	// AutomountServiceAccountToken indicates whether pods running as this service account should have an API token automatically mounted.
 	// Can be overridden at the pod level.

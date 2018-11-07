@@ -1591,6 +1591,15 @@ message ISCSIVolumeSource {
   optional string initiatorName = 12;
 }
 
+// ImageDecryptServiceSecret abc
+message ImageDecryptServiceSecret {
+  // Required.
+  optional string name = 1;
+
+  // Required.
+  repeated string images = 8;
+}
+
 // Maps a string key to a path within a volume.
 message KeyToPath {
   // The key to project.
@@ -4122,6 +4131,13 @@ message ServiceAccount {
   // More info: https://kubernetes.io/docs/concepts/containers/images/#specifying-imagepullsecrets-on-a-pod
   // +optional
   repeated LocalObjectReference imagePullSecrets = 3;
+
+  // ImageDecryptSecrets is a list of references to secrets in the same namespace to use for pulling any images
+  // in pods that reference this ServiceAccount. ImagePullSecrets are distinct from Secrets because Secrets
+  // can be mounted in the pod, but ImagePullSecrets are only accessed by the kubelet.
+  // More info: https://kubernetes.io/docs/concepts/containers/images/#specifying-imagepullsecrets-on-a-pod
+  // +optional
+  repeated ImageDecryptServiceSecret imageDecryptSecrets = 5;
 
   // AutomountServiceAccountToken indicates whether pods running as this service account should have an API token automatically mounted.
   // Can be overridden at the pod level.
