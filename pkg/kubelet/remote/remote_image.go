@@ -99,14 +99,16 @@ func (r *RemoteImageService) ImageStatus(image *runtimeapi.ImageSpec) (*runtimea
 	return resp.Image, nil
 }
 
-// PullImage pulls an image with authentication config.
-func (r *RemoteImageService) PullImage(image *runtimeapi.ImageSpec, auth *runtimeapi.AuthConfig) (string, error) {
+// PullImage pulls an image with authentication config. It will also decrypt an
+// encrypted image.
+func (r *RemoteImageService) PullImage(image *runtimeapi.ImageSpec, auth *runtimeapi.AuthConfig, dcParams *runtimeapi.DecryptParams) (string, error) {
 	ctx, cancel := getContextWithCancel()
 	defer cancel()
 
 	resp, err := r.imageClient.PullImage(ctx, &runtimeapi.PullImageRequest{
-		Image: image,
-		Auth:  auth,
+		Image:    image,
+		Auth:     auth,
+		Dcparams: dcParams,
 	})
 	if err != nil {
 		glog.Errorf("PullImage %q from image service failed: %v", image.Image, err)

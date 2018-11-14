@@ -1658,6 +1658,11 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 
 	// Fetch the pull secrets for the pod
 	pullSecrets := kl.getPullSecretsForPod(pod)
+	// Fetch the decrypt secrets for the pod
+	decryptSecrets := kl.getDecryptSecretesForImage(pod)
+	//decryptSecrets = []v1.Secret{}
+	pullSecrets = append(pullSecrets, decryptSecrets...)
+	//kl.getDecryptSecretesForImage(pod)
 
 	// Call the container runtime's SyncPod callback
 	result := kl.containerRuntime.SyncPod(pod, apiPodStatus, podStatus, pullSecrets, kl.backOff)
