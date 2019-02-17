@@ -20,8 +20,10 @@ import (
 	"flag"
 	"os"
 
-	_ "github.com/golang/glog"
 	"github.com/spf13/pflag"
+
+	// ensure libs have a chance to globally register their flags
+	_ "k8s.io/klog"
 
 	utilflag "k8s.io/apiserver/pkg/util/flag"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd"

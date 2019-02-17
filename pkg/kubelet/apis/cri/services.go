@@ -112,7 +112,7 @@ type ImageManagerService interface {
 	ImageStatus(image *runtimeapi.ImageSpec) (*runtimeapi.Image, error)
 	// PullImage pulls an image with the authentication config.
 	// If the image is encrypted it will also decrypt it after pulling.
-	PullImage(image *runtimeapi.ImageSpec, auth *runtimeapi.AuthConfig, dcParams *runtimeapi.DecryptParams) (string, error)
+	PullImage(image *runtimeapi.ImageSpec, auth *runtimeapi.AuthConfig, dcParams *runtimeapi.DecryptParams, podSandboxConfig *runtimeapi.PodSandboxConfig) (string, error)
 	// RemoveImage removes the image.
 	RemoveImage(image *runtimeapi.ImageSpec) error
 	// ImageFsInfo returns information of the filesystem that is used to store images.

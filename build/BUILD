@@ -1,7 +1,12 @@
 package(default_visibility = ["//visibility:public"])
 
 load("@io_bazel_rules_docker//container:container.bzl", "container_bundle", "container_image")
-load("@io_kubernetes_build//defs:build.bzl", "release_filegroup")
+load("@io_k8s_repo_infra//defs:build.bzl", "release_filegroup")
+load(":code_generation_test.bzl", "code_generation_test_suite")
+
+code_generation_test_suite(
+    name = "code_generation_tests",
+)
 
 filegroup(
     name = "package-srcs",
@@ -66,7 +71,6 @@ DOCKERIZED_BINARIES = {
     images = {
         "k8s.gcr.io/%s:{STABLE_DOCKER_TAG}" % binary: binary + "-internal",
     },
-    stamp = True,
 ) for binary in DOCKERIZED_BINARIES.keys()]
 
 [genrule(
@@ -87,12 +91,6 @@ grep ^STABLE_BUILD_SCM_REVISION bazel-out/stable-status.txt \
     >$@
 """,
     stamp = 1,
-)
-
-genrule(
-    name = "cni_package_version",
-    outs = ["cni_version"],
-    cmd = "echo 0.5.1 >$@",
 )
 
 release_filegroup(

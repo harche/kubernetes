@@ -76,20 +76,11 @@ func CheckClusterHealth(client clientset.Interface, ignoreChecksErrors sets.Stri
 		// TODO: Add a check for ComponentStatuses here?
 	}
 
-	// Run slightly different health checks depending on control plane hosting type
-	if IsControlPlaneSelfHosted(client) {
-		healthChecks = append(healthChecks, &healthCheck{
-			name:   "ControlPlaneHealth",
-			client: client,
-			f:      controlPlaneHealth,
-		})
-	} else {
-		healthChecks = append(healthChecks, &healthCheck{
-			name:   "StaticPodManifest",
-			client: client,
-			f:      staticPodManifestHealth,
-		})
-	}
+	healthChecks = append(healthChecks, &healthCheck{
+		name:   "StaticPodManifest",
+		client: client,
+		f:      staticPodManifestHealth,
+	})
 
 	return preflight.RunChecks(healthChecks, os.Stderr, ignoreChecksErrors)
 }
@@ -118,29 +109,16 @@ func masterNodesReady(client clientset.Interface) error {
 		LabelSelector: selector.String(),
 	})
 	if err != nil {
-		return errors.Wrap(err, "couldn't list masters in cluster")
+		return errors.Wrap(err, "couldn't list control-planes in cluster")
 	}
 
 	if len(masters.Items) == 0 {
-		return errors.New("failed to find any nodes with master role")
+		return errors.New("failed to find any nodes with a control-plane role")
 	}
 
 	notReadyMasters := getNotReadyNodes(masters.Items)
 	if len(notReadyMasters) != 0 {
-		return errors.Errorf("there are NotReady masters in the cluster: %v", notReadyMasters)
-	}
-	return nil
-}
-
-// controlPlaneHealth ensures all control plane DaemonSets are healthy
-func controlPlaneHealth(client clientset.Interface) error {
-	notReadyDaemonSets, err := getNotReadyDaemonSets(client)
-	if err != nil {
-		return err
-	}
-
-	if len(notReadyDaemonSets) != 0 {
-		return errors.Errorf("there are control plane DaemonSets in the cluster that are not ready: %v", notReadyDaemonSets)
+		return errors.Errorf("there are NotReady control-planes in the cluster: %v", notReadyMasters)
 	}
 	return nil
 }
@@ -167,7 +145,7 @@ func IsControlPlaneSelfHosted(client clientset.Interface) bool {
 		return false
 	}
 
-	// If there are no NotReady DaemonSets, we are using self-hosting
+	// If there are no NotReady DaemonSets, we are using selfhosting
 	return len(notReadyDaemonSets) == 0
 }
 
