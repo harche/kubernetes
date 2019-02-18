@@ -32,7 +32,7 @@ import (
 	"strings"
 	"sync"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -839,7 +839,7 @@ func (kl *Kubelet) getDecryptSecretesForImage(pod *v1.Pod) []v1.Secret {
 			secret.Labels["image"] = strings.Join(s, ",")
 
 			if err != nil {
-				glog.Warningf("Unable to retrieve decrypt secret %s/%s for %s/%s due to %v.  The image decryption may not succeed.", pod.Namespace, secretRef.Name, pod.Namespace, pod.Name, err)
+				klog.Warningf("Unable to retrieve decrypt secret %s/%s for %s/%s due to %v.  The image decryption may not succeed.", pod.Namespace, secretRef.Name, pod.Namespace, pod.Name, err)
 				continue
 			}
 			decryptSecrets = append(decryptSecrets, *secret)
