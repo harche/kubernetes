@@ -30,6 +30,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coreos/go-systemd/daemon"
@@ -37,16 +38,16 @@ import (
 	"github.com/spf13/pflag"
 	"k8s.io/klog"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apiserver/pkg/server/healthz"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	"k8s.io/apiserver/pkg/util/flag"
 	clientset "k8s.io/client-go/kubernetes"
 	certificatesclient "k8s.io/client-go/kubernetes/typed/certificates/v1beta1"
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -55,8 +56,9 @@ import (
 	"k8s.io/client-go/tools/record"
 	certutil "k8s.io/client-go/util/cert"
 	"k8s.io/client-go/util/certificate"
+	"k8s.io/client-go/util/keyutil"
 	cloudprovider "k8s.io/cloud-provider"
-	csiclientset "k8s.io/csi-api/pkg/client/clientset/versioned"
+	cliflag "k8s.io/component-base/cli/flag"
 	kubeletconfigv1beta1 "k8s.io/kubelet/config/v1beta1"
 	"k8s.io/kubernetes/cmd/kubelet/app/options"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
@@ -94,7 +96,8 @@ import (
 	"k8s.io/kubernetes/pkg/util/rlimit"
 	"k8s.io/kubernetes/pkg/version"
 	"k8s.io/kubernetes/pkg/version/verflag"
-	nodeapiclientset "k8s.io/node-api/pkg/client/clientset/versioned"
+	nsutil "k8s.io/kubernetes/pkg/volume/util/nsenter"
+	"k8s.io/kubernetes/pkg/volume/util/subpath"
 	"k8s.io/utils/exec"
 	"k8s.io/utils/nsenter"
 )
@@ -107,7 +110,7 @@ const (
 // NewKubeletCommand creates a *cobra.Command object with default parameters
 func NewKubeletCommand(stopCh <-chan struct{}) *cobra.Command {
 	cleanFlagSet := pflag.NewFlagSet(componentKubelet, pflag.ContinueOnError)
-	cleanFlagSet.SetNormalizeFunc(flag.WordSepNormalizeFunc)
+	cleanFlagSet.SetNormalizeFunc(cliflag.WordSepNormalizeFunc)
 	kubeletFlags := options.NewKubeletFlags()
 	kubeletConfig, err := options.NewKubeletConfiguration()
 	// programmer error
@@ -290,8 +293,8 @@ HTTP server: The kubelet can also listen for HTTP and respond to a simple API
 // on it.
 func newFlagSetWithGlobals() *pflag.FlagSet {
 	fs := pflag.NewFlagSet("", pflag.ExitOnError)
-	// set the normalize func, similar to k8s.io/apiserver/pkg/util/flag/flags.go:InitFlags
-	fs.SetNormalizeFunc(flag.WordSepNormalizeFunc)
+	// set the normalize func, similar to k8s.io/component-base/cli//flags.go:InitFlags
+	fs.SetNormalizeFunc(cliflag.WordSepNormalizeFunc)
 	// explicitly add flags from libs that register global flags
 	options.AddGlobalFlags(fs)
 	return fs
@@ -303,7 +306,7 @@ func newFakeFlagSet(fs *pflag.FlagSet) *pflag.FlagSet {
 	ret := pflag.NewFlagSet("", pflag.ExitOnError)
 	ret.SetNormalizeFunc(fs.GetNormalizeFunc())
 	fs.VisitAll(func(f *pflag.Flag) {
-		ret.VarP(flag.NoOp{}, f.Name, f.Shorthand, f.Usage)
+		ret.VarP(cliflag.NoOp{}, f.Name, f.Shorthand, f.Usage)
 	})
 	return ret
 }
@@ -363,6 +366,7 @@ func UnsecuredDependencies(s *options.KubeletServer) (*kubelet.Dependencies, err
 	}
 
 	mounter := mount.New(s.ExperimentalMounterPath)
+	subpather := subpath.New(mounter)
 	var pluginRunner = exec.New()
 	if s.Containerized {
 		klog.V(2).Info("Running kubelet in containerized mode")
@@ -370,7 +374,9 @@ func UnsecuredDependencies(s *options.KubeletServer) (*kubelet.Dependencies, err
 		if err != nil {
 			return nil, err
 		}
-		mounter = mount.NewNsenterMounter(s.RootDirectory, ne)
+		mounter = nsutil.NewMounter(s.RootDirectory, ne)
+		// NSenter only valid on Linux
+		subpather = subpath.NewNSEnter(mounter, ne, s.RootDirectory)
 		// an exec interface which can use nsenter for flex plugin calls
 		pluginRunner, err = nsenter.NewNsenter(nsenter.DefaultHostRootFsPath, exec.New())
 		if err != nil {
@@ -395,9 +401,9 @@ func UnsecuredDependencies(s *options.KubeletServer) (*kubelet.Dependencies, err
 		DockerClientConfig:  dockerClientConfig,
 		KubeClient:          nil,
 		HeartbeatClient:     nil,
-		CSIClient:           nil,
 		EventClient:         nil,
 		Mounter:             mounter,
+		Subpather:           subpather,
 		OOMAdjuster:         oom.NewOOMAdjuster(),
 		OSInterface:         kubecontainer.RealOS{},
 		VolumePlugins:       ProbeVolumePlugins(),
@@ -588,19 +594,6 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, stopCh <-chan
 		if err != nil {
 			return fmt.Errorf("failed to initialize kubelet heartbeat client: %v", err)
 		}
-
-		// CRDs are JSON only, and client renegotiation for streaming is not correct as per #67803
-		crdClientConfig := restclient.CopyConfig(clientConfig)
-		crdClientConfig.ContentType = "application/json"
-		kubeDeps.CSIClient, err = csiclientset.NewForConfig(crdClientConfig)
-		if err != nil {
-			return fmt.Errorf("failed to initialize kubelet storage client: %v", err)
-		}
-
-		kubeDeps.NodeAPIClient, err = nodeapiclientset.NewForConfig(crdClientConfig)
-		if err != nil {
-			return fmt.Errorf("failed to initialize kubelet node-api client: %v", err)
-		}
 	}
 
 	// If the kubelet config controller is available, and dynamic config is enabled, start the config and status sync loops
@@ -767,6 +760,11 @@ func buildKubeletClientConfig(s *options.KubeletServer, nodeName types.NodeName)
 			return nil, nil, err
 		}
 
+		// use the correct content type for cert rotation, but don't set QPS
+		setContentTypeForClient(certConfig, s.ContentType)
+
+		kubeClientConfigOverrides(s, clientConfig)
+
 		clientCertificateManager, err := buildClientCertificateManager(certConfig, clientConfig, s.CertDirectory, nodeName)
 		if err != nil {
 			return nil, nil, err
@@ -774,7 +772,6 @@ func buildKubeletClientConfig(s *options.KubeletServer, nodeName types.NodeName)
 
 		// the rotating transport will use the cert from the cert manager instead of these files
 		transportConfig := restclient.AnonymousClientConfig(clientConfig)
-		kubeClientConfigOverrides(s, transportConfig)
 
 		// we set exitAfter to five minutes because we use this client configuration to request new certs - if we are unable
 		// to request new certs, we will be unable to continue normal operation. Exiting the process allows a wrapper
@@ -846,7 +843,7 @@ func buildClientCertificateManager(certConfig, clientConfig *restclient.Config, 
 }
 
 func kubeClientConfigOverrides(s *options.KubeletServer, clientConfig *restclient.Config) {
-	clientConfig.ContentType = s.ContentType
+	setContentTypeForClient(clientConfig, s.ContentType)
 	// Override kubeconfig qps/burst settings from flags
 	clientConfig.QPS = float32(s.KubeAPIQPS)
 	clientConfig.Burst = int(s.KubeAPIBurst)
@@ -899,7 +896,7 @@ func InitializeTLS(kf *options.KubeletFlags, kc *kubeletconfiginternal.KubeletCo
 				return nil, err
 			}
 
-			if err := certutil.WriteKey(kc.TLSPrivateKeyFile, key); err != nil {
+			if err := keyutil.WriteKey(kc.TLSPrivateKeyFile, key); err != nil {
 				return nil, err
 			}
 
@@ -907,12 +904,12 @@ func InitializeTLS(kf *options.KubeletFlags, kc *kubeletconfiginternal.KubeletCo
 		}
 	}
 
-	tlsCipherSuites, err := flag.TLSCipherSuites(kc.TLSCipherSuites)
+	tlsCipherSuites, err := cliflag.TLSCipherSuites(kc.TLSCipherSuites)
 	if err != nil {
 		return nil, err
 	}
 
-	minTLSVersion, err := flag.TLSVersion(kc.TLSMinVersion)
+	minTLSVersion, err := cliflag.TLSVersion(kc.TLSMinVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -938,6 +935,21 @@ func InitializeTLS(kf *options.KubeletFlags, kc *kubeletconfiginternal.KubeletCo
 	}
 
 	return tlsOptions, nil
+}
+
+// setContentTypeForClient sets the appropritae content type into the rest config
+// and handles defaulting AcceptContentTypes based on that input.
+func setContentTypeForClient(cfg *restclient.Config, contentType string) {
+	if len(contentType) == 0 {
+		return
+	}
+	cfg.ContentType = contentType
+	switch contentType {
+	case runtime.ContentTypeProtobuf:
+		cfg.AcceptContentTypes = strings.Join([]string{runtime.ContentTypeProtobuf, runtime.ContentTypeJSON}, ",")
+	default:
+		// otherwise let the rest client perform defaulting
+	}
 }
 
 // RunKubelet is responsible for setting up and running a kubelet.  It is used in three different applications:

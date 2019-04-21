@@ -25,8 +25,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/clock"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 	"k8s.io/klog"
-	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/kubelet/metrics"
 )
@@ -189,12 +189,14 @@ func (g *GenericPLEG) relist() {
 	klog.V(5).Infof("GenericPLEG: Relisting")
 
 	if lastRelistTime := g.getRelistTime(); !lastRelistTime.IsZero() {
-		metrics.PLEGRelistInterval.Observe(metrics.SinceInMicroseconds(lastRelistTime))
+		metrics.PLEGRelistInterval.Observe(metrics.SinceInSeconds(lastRelistTime))
+		metrics.DeprecatedPLEGRelistInterval.Observe(metrics.SinceInMicroseconds(lastRelistTime))
 	}
 
 	timestamp := g.clock.Now()
 	defer func() {
-		metrics.PLEGRelistLatency.Observe(metrics.SinceInMicroseconds(timestamp))
+		metrics.PLEGRelistDuration.Observe(metrics.SinceInSeconds(timestamp))
+		metrics.DeprecatedPLEGRelistLatency.Observe(metrics.SinceInMicroseconds(timestamp))
 	}()
 
 	// Get all the pods.

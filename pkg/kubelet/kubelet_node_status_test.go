@@ -49,6 +49,7 @@ import (
 	"k8s.io/client-go/rest"
 	core "k8s.io/client-go/testing"
 	"k8s.io/kubernetes/pkg/features"
+	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
 	cadvisortest "k8s.io/kubernetes/pkg/kubelet/cadvisor/testing"
 	"k8s.io/kubernetes/pkg/kubelet/cm"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
@@ -165,10 +166,6 @@ func (s sortableNodeAddress) Less(i, j int) bool {
 	return (string(s[i].Type) + s[i].Address) < (string(s[j].Type) + s[j].Address)
 }
 func (s sortableNodeAddress) Swap(i, j int) { s[j], s[i] = s[i], s[j] }
-
-func sortNodeAddresses(addrs sortableNodeAddress) {
-	sort.Sort(addrs)
-}
 
 func TestUpdateNewNodeStatus(t *testing.T) {
 	cases := []struct {
@@ -938,7 +935,7 @@ func TestUpdateNodeStatusWithLease(t *testing.T) {
 	assert.Equal(t, v1.NodeReady, updatedNode.Status.Conditions[len(updatedNode.Status.Conditions)-1].Type,
 		"NodeReady should be the last condition")
 
-	// Update node status again when nothing is changed (except heatbeat time).
+	// Update node status again when nothing is changed (except heartbeat time).
 	// Report node status if it has exceeded the duration of nodeStatusReportFrequency.
 	clock.Step(time.Minute)
 	assert.NoError(t, kubelet.updateNodeStatus())
@@ -963,7 +960,7 @@ func TestUpdateNodeStatusWithLease(t *testing.T) {
 	}
 	assert.True(t, apiequality.Semantic.DeepEqual(expectedNode, updatedNode), "%s", diff.ObjectDiff(expectedNode, updatedNode))
 
-	// Update node status again when nothing is changed (except heatbeat time).
+	// Update node status again when nothing is changed (except heartbeat time).
 	// Do not report node status if it is within the duration of nodeStatusReportFrequency.
 	clock.Step(10 * time.Second)
 	assert.NoError(t, kubelet.updateNodeStatus())
@@ -1253,11 +1250,11 @@ func TestRegisterWithApiServer(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testKubeletHostname,
 				Labels: map[string]string{
-					v1.LabelHostname:   testKubeletHostname,
-					v1.LabelOS:         goruntime.GOOS,
-					v1.LabelArch:       goruntime.GOARCH,
-					v1.LegacyLabelOS:   goruntime.GOOS,
-					v1.LegacyLabelArch: goruntime.GOARCH,
+					v1.LabelHostname:      testKubeletHostname,
+					v1.LabelOSStable:      goruntime.GOOS,
+					v1.LabelArchStable:    goruntime.GOARCH,
+					kubeletapis.LabelOS:   goruntime.GOOS,
+					kubeletapis.LabelArch: goruntime.GOARCH,
 				},
 			},
 		}, nil
@@ -1300,11 +1297,11 @@ func TestTryRegisterWithApiServer(t *testing.T) {
 		node := &v1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1.LabelHostname:   testKubeletHostname,
-					v1.LabelOS:         goruntime.GOOS,
-					v1.LabelArch:       goruntime.GOARCH,
-					v1.LegacyLabelOS:   goruntime.GOOS,
-					v1.LegacyLabelArch: goruntime.GOARCH,
+					v1.LabelHostname:      testKubeletHostname,
+					v1.LabelOSStable:      goruntime.GOOS,
+					v1.LabelArchStable:    goruntime.GOARCH,
+					kubeletapis.LabelOS:   goruntime.GOOS,
+					kubeletapis.LabelArch: goruntime.GOARCH,
 				},
 			},
 		}
@@ -1536,8 +1533,8 @@ func TestUpdateDefaultLabels(t *testing.T) {
 						v1.LabelZoneFailureDomain: "new-zone-failure-domain",
 						v1.LabelZoneRegion:        "new-zone-region",
 						v1.LabelInstanceType:      "new-instance-type",
-						v1.LabelOS:                "new-os",
-						v1.LabelArch:              "new-arch",
+						kubeletapis.LabelOS:       "new-os",
+						kubeletapis.LabelArch:     "new-arch",
 					},
 				},
 			},
@@ -1552,8 +1549,8 @@ func TestUpdateDefaultLabels(t *testing.T) {
 				v1.LabelZoneFailureDomain: "new-zone-failure-domain",
 				v1.LabelZoneRegion:        "new-zone-region",
 				v1.LabelInstanceType:      "new-instance-type",
-				v1.LabelOS:                "new-os",
-				v1.LabelArch:              "new-arch",
+				kubeletapis.LabelOS:       "new-os",
+				kubeletapis.LabelArch:     "new-arch",
 			},
 		},
 		{
@@ -1565,8 +1562,8 @@ func TestUpdateDefaultLabels(t *testing.T) {
 						v1.LabelZoneFailureDomain: "new-zone-failure-domain",
 						v1.LabelZoneRegion:        "new-zone-region",
 						v1.LabelInstanceType:      "new-instance-type",
-						v1.LabelOS:                "new-os",
-						v1.LabelArch:              "new-arch",
+						kubeletapis.LabelOS:       "new-os",
+						kubeletapis.LabelArch:     "new-arch",
 					},
 				},
 			},
@@ -1577,8 +1574,8 @@ func TestUpdateDefaultLabels(t *testing.T) {
 						v1.LabelZoneFailureDomain: "old-zone-failure-domain",
 						v1.LabelZoneRegion:        "old-zone-region",
 						v1.LabelInstanceType:      "old-instance-type",
-						v1.LabelOS:                "old-os",
-						v1.LabelArch:              "old-arch",
+						kubeletapis.LabelOS:       "old-os",
+						kubeletapis.LabelArch:     "old-arch",
 					},
 				},
 			},
@@ -1588,8 +1585,8 @@ func TestUpdateDefaultLabels(t *testing.T) {
 				v1.LabelZoneFailureDomain: "new-zone-failure-domain",
 				v1.LabelZoneRegion:        "new-zone-region",
 				v1.LabelInstanceType:      "new-instance-type",
-				v1.LabelOS:                "new-os",
-				v1.LabelArch:              "new-arch",
+				kubeletapis.LabelOS:       "new-os",
+				kubeletapis.LabelArch:     "new-arch",
 			},
 		},
 		{
@@ -1601,8 +1598,8 @@ func TestUpdateDefaultLabels(t *testing.T) {
 						v1.LabelZoneFailureDomain: "new-zone-failure-domain",
 						v1.LabelZoneRegion:        "new-zone-region",
 						v1.LabelInstanceType:      "new-instance-type",
-						v1.LabelOS:                "new-os",
-						v1.LabelArch:              "new-arch",
+						kubeletapis.LabelOS:       "new-os",
+						kubeletapis.LabelArch:     "new-arch",
 					},
 				},
 			},
@@ -1613,8 +1610,8 @@ func TestUpdateDefaultLabels(t *testing.T) {
 						v1.LabelZoneFailureDomain: "new-zone-failure-domain",
 						v1.LabelZoneRegion:        "new-zone-region",
 						v1.LabelInstanceType:      "new-instance-type",
-						v1.LabelOS:                "new-os",
-						v1.LabelArch:              "new-arch",
+						kubeletapis.LabelOS:       "new-os",
+						kubeletapis.LabelArch:     "new-arch",
 						"please-persist":          "foo",
 					},
 				},
@@ -1625,8 +1622,8 @@ func TestUpdateDefaultLabels(t *testing.T) {
 				v1.LabelZoneFailureDomain: "new-zone-failure-domain",
 				v1.LabelZoneRegion:        "new-zone-region",
 				v1.LabelInstanceType:      "new-instance-type",
-				v1.LabelOS:                "new-os",
-				v1.LabelArch:              "new-arch",
+				kubeletapis.LabelOS:       "new-os",
+				kubeletapis.LabelArch:     "new-arch",
 				"please-persist":          "foo",
 			},
 		},
@@ -1644,8 +1641,8 @@ func TestUpdateDefaultLabels(t *testing.T) {
 						v1.LabelZoneFailureDomain: "new-zone-failure-domain",
 						v1.LabelZoneRegion:        "new-zone-region",
 						v1.LabelInstanceType:      "new-instance-type",
-						v1.LabelOS:                "new-os",
-						v1.LabelArch:              "new-arch",
+						kubeletapis.LabelOS:       "new-os",
+						kubeletapis.LabelArch:     "new-arch",
 						"please-persist":          "foo",
 					},
 				},
@@ -1656,8 +1653,8 @@ func TestUpdateDefaultLabels(t *testing.T) {
 				v1.LabelZoneFailureDomain: "new-zone-failure-domain",
 				v1.LabelZoneRegion:        "new-zone-region",
 				v1.LabelInstanceType:      "new-instance-type",
-				v1.LabelOS:                "new-os",
-				v1.LabelArch:              "new-arch",
+				kubeletapis.LabelOS:       "new-os",
+				kubeletapis.LabelArch:     "new-arch",
 				"please-persist":          "foo",
 			},
 		},
@@ -1670,8 +1667,8 @@ func TestUpdateDefaultLabels(t *testing.T) {
 						v1.LabelZoneFailureDomain: "new-zone-failure-domain",
 						v1.LabelZoneRegion:        "new-zone-region",
 						v1.LabelInstanceType:      "new-instance-type",
-						v1.LabelOS:                "new-os",
-						v1.LabelArch:              "new-arch",
+						kubeletapis.LabelOS:       "new-os",
+						kubeletapis.LabelArch:     "new-arch",
 					},
 				},
 			},
@@ -1682,8 +1679,8 @@ func TestUpdateDefaultLabels(t *testing.T) {
 						v1.LabelZoneFailureDomain: "new-zone-failure-domain",
 						v1.LabelZoneRegion:        "new-zone-region",
 						v1.LabelInstanceType:      "new-instance-type",
-						v1.LabelOS:                "new-os",
-						v1.LabelArch:              "new-arch",
+						kubeletapis.LabelOS:       "new-os",
+						kubeletapis.LabelArch:     "new-arch",
 					},
 				},
 			},
@@ -1693,8 +1690,8 @@ func TestUpdateDefaultLabels(t *testing.T) {
 				v1.LabelZoneFailureDomain: "new-zone-failure-domain",
 				v1.LabelZoneRegion:        "new-zone-region",
 				v1.LabelInstanceType:      "new-instance-type",
-				v1.LabelOS:                "new-os",
-				v1.LabelArch:              "new-arch",
+				kubeletapis.LabelOS:       "new-os",
+				kubeletapis.LabelArch:     "new-arch",
 			},
 		},
 		{
@@ -1706,8 +1703,8 @@ func TestUpdateDefaultLabels(t *testing.T) {
 						v1.LabelZoneFailureDomain: "new-zone-failure-domain",
 						v1.LabelZoneRegion:        "new-zone-region",
 						v1.LabelInstanceType:      "new-instance-type",
-						v1.LabelOS:                "new-os",
-						v1.LabelArch:              "new-arch",
+						kubeletapis.LabelOS:       "new-os",
+						kubeletapis.LabelArch:     "new-arch",
 					},
 				},
 			},
@@ -1720,8 +1717,8 @@ func TestUpdateDefaultLabels(t *testing.T) {
 				v1.LabelZoneFailureDomain: "new-zone-failure-domain",
 				v1.LabelZoneRegion:        "new-zone-region",
 				v1.LabelInstanceType:      "new-instance-type",
-				v1.LabelOS:                "new-os",
-				v1.LabelArch:              "new-arch",
+				kubeletapis.LabelOS:       "new-os",
+				kubeletapis.LabelArch:     "new-arch",
 			},
 		},
 	}

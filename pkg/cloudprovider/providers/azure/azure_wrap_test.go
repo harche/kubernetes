@@ -142,3 +142,134 @@ func TestIsNodeUnmanagedByProviderID(t *testing.T) {
 		assert.Equal(t, test.expected, isUnmanagedNode, test.providerID)
 	}
 }
+
+func TestConvertResourceGroupNameToLower(t *testing.T) {
+	tests := []struct {
+		desc        string
+		resourceID  string
+		expected    string
+		expectError bool
+	}{
+		{
+			desc:        "empty string should report error",
+			resourceID:  "",
+			expectError: true,
+		},
+		{
+			desc:        "resourceID not in Azure format should report error",
+			resourceID:  "invalid-id",
+			expectError: true,
+		},
+		{
+			desc:        "providerID not in Azure format should report error",
+			resourceID:  "azure://invalid-id",
+			expectError: true,
+		},
+		{
+			desc:       "resource group name in VM providerID should be converted",
+			resourceID: CloudProviderName + ":///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroupName/providers/Microsoft.Compute/virtualMachines/k8s-agent-AAAAAAAA-0",
+			expected:   CloudProviderName + ":///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myresourcegroupname/providers/Microsoft.Compute/virtualMachines/k8s-agent-AAAAAAAA-0",
+		},
+		{
+			desc:       "resource group name in VM resourceID should be converted",
+			resourceID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroupName/providers/Microsoft.Compute/virtualMachines/k8s-agent-AAAAAAAA-0",
+			expected:   "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myresourcegroupname/providers/Microsoft.Compute/virtualMachines/k8s-agent-AAAAAAAA-0",
+		},
+		{
+			desc:       "resource group name in VMSS providerID should be converted",
+			resourceID: CloudProviderName + ":///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroupName/providers/Microsoft.Compute/virtualMachineScaleSets/myScaleSetName/virtualMachines/156",
+			expected:   CloudProviderName + ":///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myresourcegroupname/providers/Microsoft.Compute/virtualMachineScaleSets/myScaleSetName/virtualMachines/156",
+		},
+		{
+			desc:       "resource group name in VMSS resourceID should be converted",
+			resourceID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroupName/providers/Microsoft.Compute/virtualMachineScaleSets/myScaleSetName/virtualMachines/156",
+			expected:   "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myresourcegroupname/providers/Microsoft.Compute/virtualMachineScaleSets/myScaleSetName/virtualMachines/156",
+		},
+	}
+
+	for _, test := range tests {
+		real, err := convertResourceGroupNameToLower(test.resourceID)
+		if test.expectError {
+			assert.NotNil(t, err, test.desc)
+			continue
+		}
+
+		assert.Nil(t, err, test.desc)
+		assert.Equal(t, test.expected, real, test.desc)
+	}
+}
+
+func TestIsBackendPoolOnSameLB(t *testing.T) {
+	tests := []struct {
+		backendPoolID        string
+		existingBackendPools []string
+		expected             bool
+		expectedLBName       string
+		expectError          bool
+	}{
+		{
+			backendPoolID: "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/lb1/backendAddressPools/pool1",
+			existingBackendPools: []string{
+				"/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/lb1/backendAddressPools/pool2",
+			},
+			expected:       true,
+			expectedLBName: "",
+		},
+		{
+			backendPoolID: "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/lb1-internal/backendAddressPools/pool1",
+			existingBackendPools: []string{
+				"/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/lb1/backendAddressPools/pool2",
+			},
+			expected:       true,
+			expectedLBName: "",
+		},
+		{
+			backendPoolID: "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/lb1/backendAddressPools/pool1",
+			existingBackendPools: []string{
+				"/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/lb1-internal/backendAddressPools/pool2",
+			},
+			expected:       true,
+			expectedLBName: "",
+		},
+		{
+			backendPoolID: "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/lb1/backendAddressPools/pool1",
+			existingBackendPools: []string{
+				"/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/lb2/backendAddressPools/pool2",
+			},
+			expected:       false,
+			expectedLBName: "lb2",
+		},
+		{
+			backendPoolID: "wrong-backendpool-id",
+			existingBackendPools: []string{
+				"/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/lb1/backendAddressPools/pool2",
+			},
+			expectError: true,
+		},
+		{
+			backendPoolID: "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/lb1/backendAddressPools/pool1",
+			existingBackendPools: []string{
+				"wrong-existing-backendpool-id",
+			},
+			expectError: true,
+		},
+		{
+			backendPoolID: "wrong-backendpool-id",
+			existingBackendPools: []string{
+				"wrong-existing-backendpool-id",
+			},
+			expectError: true,
+		},
+	}
+
+	for _, test := range tests {
+		isSameLB, lbName, err := isBackendPoolOnSameLB(test.backendPoolID, test.existingBackendPools)
+		if test.expectError {
+			assert.Error(t, err)
+			continue
+		}
+
+		assert.Equal(t, test.expected, isSameLB)
+		assert.Equal(t, test.expectedLBName, lbName)
+	}
+}

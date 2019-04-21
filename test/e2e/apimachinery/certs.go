@@ -21,9 +21,10 @@ import (
 	"io/ioutil"
 	"os"
 
-	certutil "k8s.io/client-go/util/cert"
-	"k8s.io/kubernetes/cmd/kubeadm/app/util/pkiutil"
+	"k8s.io/client-go/util/cert"
+	"k8s.io/client-go/util/keyutil"
 	"k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/kubernetes/test/utils"
 )
 
 type certContext struct {
@@ -40,11 +41,11 @@ func setupServerCert(namespaceName, serviceName string) *certContext {
 		framework.Failf("Failed to create a temp dir for cert generation %v", err)
 	}
 	defer os.RemoveAll(certDir)
-	signingKey, err := pkiutil.NewPrivateKey()
+	signingKey, err := utils.NewPrivateKey()
 	if err != nil {
 		framework.Failf("Failed to create CA private key %v", err)
 	}
-	signingCert, err := certutil.NewSelfSignedCACert(certutil.Config{CommonName: "e2e-server-cert-ca"}, signingKey)
+	signingCert, err := cert.NewSelfSignedCACert(cert.Config{CommonName: "e2e-server-cert-ca"}, signingKey)
 	if err != nil {
 		framework.Failf("Failed to create CA cert for apiserver %v", err)
 	}
@@ -52,15 +53,15 @@ func setupServerCert(namespaceName, serviceName string) *certContext {
 	if err != nil {
 		framework.Failf("Failed to create a temp file for ca cert generation %v", err)
 	}
-	if err := ioutil.WriteFile(caCertFile.Name(), pkiutil.EncodeCertPEM(signingCert), 0644); err != nil {
+	if err := ioutil.WriteFile(caCertFile.Name(), utils.EncodeCertPEM(signingCert), 0644); err != nil {
 		framework.Failf("Failed to write CA cert %v", err)
 	}
-	key, err := pkiutil.NewPrivateKey()
+	key, err := utils.NewPrivateKey()
 	if err != nil {
 		framework.Failf("Failed to create private key for %v", err)
 	}
-	signedCert, err := pkiutil.NewSignedCert(
-		&certutil.Config{
+	signedCert, err := utils.NewSignedCert(
+		&cert.Config{
 			CommonName: serviceName + "." + namespaceName + ".svc",
 			Usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		},
@@ -77,15 +78,19 @@ func setupServerCert(namespaceName, serviceName string) *certContext {
 	if err != nil {
 		framework.Failf("Failed to create a temp file for key generation %v", err)
 	}
-	if err = ioutil.WriteFile(certFile.Name(), pkiutil.EncodeCertPEM(signedCert), 0600); err != nil {
+	if err = ioutil.WriteFile(certFile.Name(), utils.EncodeCertPEM(signedCert), 0600); err != nil {
 		framework.Failf("Failed to write cert file %v", err)
 	}
-	if err = ioutil.WriteFile(keyFile.Name(), certutil.EncodePrivateKeyPEM(key), 0644); err != nil {
+	privateKeyPEM, err := keyutil.MarshalPrivateKeyToPEM(key)
+	if err != nil {
+		framework.Failf("Failed to marshal key %v", err)
+	}
+	if err = ioutil.WriteFile(keyFile.Name(), privateKeyPEM, 0644); err != nil {
 		framework.Failf("Failed to write key file %v", err)
 	}
 	return &certContext{
-		cert:        pkiutil.EncodeCertPEM(signedCert),
-		key:         certutil.EncodePrivateKeyPEM(key),
-		signingCert: pkiutil.EncodeCertPEM(signingCert),
+		cert:        utils.EncodeCertPEM(signedCert),
+		key:         privateKeyPEM,
+		signingCert: utils.EncodeCertPEM(signingCert),
 	}
 }

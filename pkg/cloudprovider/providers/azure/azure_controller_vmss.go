@@ -18,6 +18,7 @@ package azure
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-10-01/compute"
@@ -86,33 +87,33 @@ func (ss *scaleSet) AttachDisk(isManagedDisk bool, diskName, diskURI string, nod
 	key := buildVmssCacheKey(nodeResourceGroup, ss.makeVmssVMName(ssName, instanceID))
 	defer ss.vmssVMCache.Delete(key)
 
-	klog.V(2).Infof("azureDisk - update(%s): vm(%s) - attach disk(%s)", nodeResourceGroup, nodeName, diskName)
+	klog.V(2).Infof("azureDisk - update(%s): vm(%s) - attach disk(%s, %s)", nodeResourceGroup, nodeName, diskName, diskURI)
 	_, err = ss.VirtualMachineScaleSetVMsClient.Update(ctx, nodeResourceGroup, ssName, instanceID, newVM)
 	if err != nil {
 		detail := err.Error()
 		if strings.Contains(detail, errLeaseFailed) || strings.Contains(detail, errDiskBlobNotFound) {
 			// if lease cannot be acquired or disk not found, immediately detach the disk and return the original error
-			klog.Infof("azureDisk - err %s, try detach disk(%s)", detail, diskName)
-			ss.DetachDiskByName(diskName, diskURI, nodeName)
+			klog.Infof("azureDisk - err %s, try detach disk(%s, %s)", detail, diskName, diskURI)
+			ss.DetachDisk(diskName, diskURI, nodeName)
 		}
 	} else {
-		klog.V(2).Infof("azureDisk - attach disk(%s) succeeded", diskName)
+		klog.V(2).Infof("azureDisk - attach disk(%s, %s) succeeded", diskName, diskURI)
 	}
 	return err
 }
 
-// DetachDiskByName detaches a vhd from host
+// DetachDisk detaches a disk from host
 // the vhd can be identified by diskName or diskURI
-func (ss *scaleSet) DetachDiskByName(diskName, diskURI string, nodeName types.NodeName) error {
+func (ss *scaleSet) DetachDisk(diskName, diskURI string, nodeName types.NodeName) (*http.Response, error) {
 	vmName := mapNodeNameToVMName(nodeName)
 	ssName, instanceID, vm, err := ss.getVmssVM(vmName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	nodeResourceGroup, err := ss.GetNodeResourceGroup(vmName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	disks := []compute.DataDisk{}
@@ -133,7 +134,7 @@ func (ss *scaleSet) DetachDiskByName(diskName, diskURI string, nodeName types.No
 	}
 
 	if !bFoundDisk {
-		return fmt.Errorf("detach azure disk failure, disk %s not found, diskURI: %s", diskName, diskURI)
+		return nil, fmt.Errorf("detach azure disk failure, disk %s not found, diskURI: %s", diskName, diskURI)
 	}
 
 	newVM := compute.VirtualMachineScaleSetVM{
@@ -155,15 +156,8 @@ func (ss *scaleSet) DetachDiskByName(diskName, diskURI string, nodeName types.No
 	key := buildVmssCacheKey(nodeResourceGroup, ss.makeVmssVMName(ssName, instanceID))
 	defer ss.vmssVMCache.Delete(key)
 
-	klog.V(2).Infof("azureDisk - update(%s): vm(%s) - detach disk(%s)", nodeResourceGroup, nodeName, diskName)
-	_, err = ss.VirtualMachineScaleSetVMsClient.Update(ctx, nodeResourceGroup, ssName, instanceID, newVM)
-	if err != nil {
-		klog.Errorf("azureDisk - detach disk(%s) from %s failed, err: %v", diskName, nodeName, err)
-	} else {
-		klog.V(2).Infof("azureDisk - detach disk(%s) succeeded", diskName)
-	}
-
-	return err
+	klog.V(2).Infof("azureDisk - update(%s): vm(%s) - detach disk(%s, %s)", nodeResourceGroup, nodeName, diskName, diskURI)
+	return ss.VirtualMachineScaleSetVMsClient.Update(ctx, nodeResourceGroup, ssName, instanceID, newVM)
 }
 
 // GetDataDisks gets a list of data disks attached to the node.

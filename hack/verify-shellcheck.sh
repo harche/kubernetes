@@ -66,8 +66,13 @@ remove_container () {
 # ensure we're linting the k8s source tree
 cd "${KUBE_ROOT}"
 
-# find all shell scripts excluding ./_*, ./.git/*, ./vendor*,
-# and anything git-ignored
+# Find all shell scripts excluding:
+# - Anything git-ignored - No need to lint untracked files.
+# - ./_* - No need to lint output directories.
+# - ./.git/* - Ignore anything in the git object store.
+# - ./vendor* - Vendored code should be fixed upstream instead.
+# - ./third_party/*, but re-include ./third_party/forked/*  - only code we
+#    forked should be linted and fixed.
 all_shell_scripts=()
 while IFS=$'\n' read -r script;
   do git check-ignore -q "$script" || all_shell_scripts+=("$script");
@@ -75,7 +80,8 @@ done < <(find . -name "*.sh" \
   -not \( \
     -path ./_\*      -o \
     -path ./.git\*   -o \
-    -path ./vendor\*    \
+    -path ./vendor\* -o \
+    \( -path ./third_party\* -a -not -path ./third_party/forked\* \) \
   \))
 
 # make sure known failures are sorted
@@ -87,20 +93,6 @@ failing_files=()
 while IFS=$'\n' read -r script;
   do failing_files+=("$script");
 done < <(cat "${failure_file}")
-
-# TODO(bentheelder): we should probably move this and the copy in verify-golint.sh
-# to one of the bash libs
-array_contains () {
-  local seeking=$1; shift # shift will iterate through the array
-  local in=1 # in holds the exit status for the function
-  for element; do
-    if [[ "$element" == "$seeking" ]]; then
-      in=0 # set in to 0 since we found it
-      break
-    fi
-  done
-  return $in
-}
 
 # detect if the host machine has the required shellcheck version installed
 # if so, we will use that instead.
@@ -131,19 +123,29 @@ else
   fi
 fi
 
+# common arguments we'll pass to shellcheck
+SHELLCHECK_OPTIONS=(
+  # allow following sourced files that are not specified in the command,
+  # we need this because we specify one file at at time in order to trivially
+  # detect which files are failing
+  "--external-sources"
+  # include our disabled lints
+  "--exclude=${SHELLCHECK_DISABLED}"
+)
+
 # lint each script, tracking failures
 errors=()
 not_failing=()
 for f in "${all_shell_scripts[@]}"; do
   set +o errexit
   if ${HAVE_SHELLCHECK}; then
-    failedLint=$(shellcheck --exclude="${SHELLCHECK_DISABLED}" "${f}")
+    failedLint=$(shellcheck "${SHELLCHECK_OPTIONS[@]}" "${f}")
   else
     failedLint=$(docker exec -t ${SHELLCHECK_CONTAINER} \
-                 shellcheck --exclude="${SHELLCHECK_DISABLED}" "${f}")
-  fi  
+                 shellcheck "${SHELLCHECK_OPTIONS[@]}" "${f}")
+  fi
   set -o errexit
-  array_contains "${f}" "${failing_files[@]}" && in_failing=$? || in_failing=$?
+  kube::util::array_contains "${f}" "${failing_files[@]}" && in_failing=$? || in_failing=$?
   if [[ -n "${failedLint}" ]] && [[ "${in_failing}" -ne "0" ]]; then
     errors+=( "${failedLint}" )
   fi
@@ -167,7 +169,7 @@ else
     echo 'checking by adding it to hack/.shellcheck_failures (if your reviewer is okay with it).'
     echo
   } >&2
-  false
+  exit 1
 fi
 
 if [[ ${#not_failing[@]} -gt 0 ]]; then
@@ -179,13 +181,13 @@ if [[ ${#not_failing[@]} -gt 0 ]]; then
     done
     echo
   } >&2
-  false
+  exit 1
 fi
 
 # Check that all failing_packages actually still exist
 gone=()
 for f in "${failing_files[@]}"; do
-  array_contains "$f" "${all_shell_scripts[@]}" || gone+=( "$f" )
+  kube::util::array_contains "$f" "${all_shell_scripts[@]}" || gone+=( "$f" )
 done
 
 if [[ ${#gone[@]} -gt 0 ]]; then
@@ -197,5 +199,5 @@ if [[ ${#gone[@]} -gt 0 ]]; then
     done
     echo
   } >&2
-  false
+  exit 1
 fi

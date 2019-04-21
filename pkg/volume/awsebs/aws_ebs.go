@@ -317,12 +317,15 @@ func (plugin *awsElasticBlockStorePlugin) ExpandVolumeDevice(
 	return awsVolume.ResizeDisk(volumeID, oldSize, newSize)
 }
 
-func (plugin *awsElasticBlockStorePlugin) ExpandFS(spec *volume.Spec, devicePath, deviceMountPath string, _, _ resource.Quantity) error {
-	_, err := util.GenericResizeFS(plugin.host, plugin.GetPluginName(), devicePath, deviceMountPath)
-	return err
+func (plugin *awsElasticBlockStorePlugin) NodeExpand(resizeOptions volume.NodeResizeOptions) (bool, error) {
+	_, err := util.GenericResizeFS(plugin.host, plugin.GetPluginName(), resizeOptions.DevicePath, resizeOptions.DeviceMountPath)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
-var _ volume.FSResizableVolumePlugin = &awsElasticBlockStorePlugin{}
+var _ volume.NodeExpandableVolumePlugin = &awsElasticBlockStorePlugin{}
 var _ volume.ExpandableVolumePlugin = &awsElasticBlockStorePlugin{}
 var _ volume.VolumePluginWithAttachLimits = &awsElasticBlockStorePlugin{}
 
@@ -449,27 +452,6 @@ func makeGlobalPDPath(host volume.VolumeHost, volumeID aws.KubernetesVolumeID) s
 	name := string(volumeID)
 	name = strings.Replace(name, "://", "/", -1)
 	return filepath.Join(host.GetPluginDir(awsElasticBlockStorePluginName), mount.MountsInGlobalPDPath, name)
-}
-
-// Reverses the mapping done in makeGlobalPDPath
-func getVolumeIDFromGlobalMount(host volume.VolumeHost, globalPath string) (string, error) {
-	basePath := filepath.Join(host.GetPluginDir(awsElasticBlockStorePluginName), mount.MountsInGlobalPDPath)
-	rel, err := filepath.Rel(basePath, globalPath)
-	if err != nil {
-		klog.Errorf("Failed to get volume id from global mount %s - %v", globalPath, err)
-		return "", err
-	}
-	if strings.Contains(rel, "../") {
-		klog.Errorf("Unexpected mount path: %s", globalPath)
-		return "", fmt.Errorf("unexpected mount path: " + globalPath)
-	}
-	// Reverse the :// replacement done in makeGlobalPDPath
-	volumeID := rel
-	if strings.HasPrefix(volumeID, "aws/") {
-		volumeID = strings.Replace(volumeID, "aws/", "aws://", 1)
-	}
-	klog.V(2).Info("Mapping mount dir ", globalPath, " to volumeID ", volumeID)
-	return volumeID, nil
 }
 
 func (ebs *awsElasticBlockStore) GetPath() string {

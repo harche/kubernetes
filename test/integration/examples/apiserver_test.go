@@ -42,14 +42,15 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
-	certutil "k8s.io/client-go/util/cert"
+	"k8s.io/client-go/util/cert"
+	"k8s.io/client-go/util/keyutil"
 	apiregistrationv1beta1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1beta1"
 	aggregatorclient "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset"
 	kubeaggregatorserver "k8s.io/kube-aggregator/pkg/cmd/server"
 	"k8s.io/kubernetes/cmd/kube-apiserver/app"
 	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
-	pkiutil "k8s.io/kubernetes/cmd/kubeadm/app/util/pkiutil"
 	"k8s.io/kubernetes/test/integration/framework"
+	testutil "k8s.io/kubernetes/test/utils"
 	wardlev1alpha1 "k8s.io/sample-apiserver/pkg/apis/wardle/v1alpha1"
 	wardlev1beta1 "k8s.io/sample-apiserver/pkg/apis/wardle/v1beta1"
 	sampleserver "k8s.io/sample-apiserver/pkg/cmd/server"
@@ -62,28 +63,28 @@ func TestAggregatedAPIServer(t *testing.T) {
 	certDir, _ := ioutil.TempDir("", "test-integration-apiserver")
 	defer os.RemoveAll(certDir)
 	_, defaultServiceClusterIPRange, _ := net.ParseCIDR("10.0.0.0/24")
-	proxySigningKey, err := pkiutil.NewPrivateKey()
+	proxySigningKey, err := testutil.NewPrivateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxySigningCert, err := certutil.NewSelfSignedCACert(certutil.Config{CommonName: "front-proxy-ca"}, proxySigningKey)
+	proxySigningCert, err := cert.NewSelfSignedCACert(cert.Config{CommonName: "front-proxy-ca"}, proxySigningKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	proxyCACertFile, _ := ioutil.TempFile(certDir, "proxy-ca.crt")
-	if err := ioutil.WriteFile(proxyCACertFile.Name(), pkiutil.EncodeCertPEM(proxySigningCert), 0644); err != nil {
+	if err := ioutil.WriteFile(proxyCACertFile.Name(), testutil.EncodeCertPEM(proxySigningCert), 0644); err != nil {
 		t.Fatal(err)
 	}
-	clientSigningKey, err := pkiutil.NewPrivateKey()
+	clientSigningKey, err := testutil.NewPrivateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	clientSigningCert, err := certutil.NewSelfSignedCACert(certutil.Config{CommonName: "client-ca"}, clientSigningKey)
+	clientSigningCert, err := cert.NewSelfSignedCACert(cert.Config{CommonName: "client-ca"}, clientSigningKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	clientCACertFile, _ := ioutil.TempFile(certDir, "client-ca.crt")
-	if err := ioutil.WriteFile(clientCACertFile.Name(), pkiutil.EncodeCertPEM(clientSigningCert), 0644); err != nil {
+	if err := ioutil.WriteFile(clientCACertFile.Name(), testutil.EncodeCertPEM(clientSigningCert), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -235,12 +236,12 @@ func TestAggregatedAPIServer(t *testing.T) {
 	// start the aggregator
 	aggregatorCertDir, _ := ioutil.TempDir("", "test-integration-aggregator")
 	defer os.RemoveAll(aggregatorCertDir)
-	proxyClientKey, err := pkiutil.NewPrivateKey()
+	proxyClientKey, err := testutil.NewPrivateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxyClientCert, err := pkiutil.NewSignedCert(
-		&certutil.Config{
+	proxyClientCert, err := testutil.NewSignedCert(
+		&cert.Config{
 			CommonName: "kube-aggregator",
 			Usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		},
@@ -248,10 +249,14 @@ func TestAggregatedAPIServer(t *testing.T) {
 	)
 	proxyClientCertFile, _ := ioutil.TempFile(aggregatorCertDir, "proxy-client.crt")
 	proxyClientKeyFile, _ := ioutil.TempFile(aggregatorCertDir, "proxy-client.key")
-	if err := ioutil.WriteFile(proxyClientCertFile.Name(), pkiutil.EncodeCertPEM(proxyClientCert), 0600); err != nil {
+	if err := ioutil.WriteFile(proxyClientCertFile.Name(), testutil.EncodeCertPEM(proxyClientCert), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := ioutil.WriteFile(proxyClientKeyFile.Name(), certutil.EncodePrivateKeyPEM(proxyClientKey), 0644); err != nil {
+	proxyClientKeyPEM, err := keyutil.MarshalPrivateKeyToPEM(proxyClientKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(proxyClientKeyFile.Name(), proxyClientKeyPEM, 0644); err != nil {
 		t.Fatal(err)
 	}
 	aggregatorPort := new(int32)

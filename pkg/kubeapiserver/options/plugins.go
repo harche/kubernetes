@@ -20,9 +20,6 @@ package options
 // This should probably be part of some configuration fed into the build for a
 // given binary target.
 import (
-	// Cloud providers
-	_ "k8s.io/kubernetes/pkg/cloudprovider/providers"
-
 	// Admission policies
 	"k8s.io/kubernetes/plugin/pkg/admission/admit"
 	"k8s.io/kubernetes/plugin/pkg/admission/alwayspullimages"
@@ -114,7 +111,7 @@ func RegisterAllAdmissionPlugins(plugins *admission.Plugins) {
 	exists.Register(plugins)
 	noderestriction.Register(plugins)
 	nodetaint.Register(plugins)
-	label.Register(plugins) // DEPRECATED in favor of NewPersistentVolumeLabelController in CCM
+	label.Register(plugins) // DEPRECATED, future PVs should not rely on labels for zone topology
 	podnodeselector.Register(plugins)
 	podpreset.Register(plugins)
 	podtolerationrestriction.Register(plugins)
@@ -131,15 +128,16 @@ func RegisterAllAdmissionPlugins(plugins *admission.Plugins) {
 // DefaultOffAdmissionPlugins get admission plugins off by default for kube-apiserver.
 func DefaultOffAdmissionPlugins() sets.String {
 	defaultOnPlugins := sets.NewString(
-		lifecycle.PluginName,                //NamespaceLifecycle
-		limitranger.PluginName,              //LimitRanger
-		serviceaccount.PluginName,           //ServiceAccount
-		setdefault.PluginName,               //DefaultStorageClass
-		resize.PluginName,                   //PersistentVolumeClaimResize
-		defaulttolerationseconds.PluginName, //DefaultTolerationSeconds
-		mutatingwebhook.PluginName,          //MutatingAdmissionWebhook
-		validatingwebhook.PluginName,        //ValidatingAdmissionWebhook
-		resourcequota.PluginName,            //ResourceQuota
+		lifecycle.PluginName,                    //NamespaceLifecycle
+		limitranger.PluginName,                  //LimitRanger
+		serviceaccount.PluginName,               //ServiceAccount
+		setdefault.PluginName,                   //DefaultStorageClass
+		resize.PluginName,                       //PersistentVolumeClaimResize
+		defaulttolerationseconds.PluginName,     //DefaultTolerationSeconds
+		mutatingwebhook.PluginName,              //MutatingAdmissionWebhook
+		validatingwebhook.PluginName,            //ValidatingAdmissionWebhook
+		resourcequota.PluginName,                //ResourceQuota
+		storageobjectinuseprotection.PluginName, //StorageObjectInUseProtection
 	)
 
 	if utilfeature.DefaultFeatureGate.Enabled(features.PodPriority) {

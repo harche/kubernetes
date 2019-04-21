@@ -21,7 +21,6 @@ import (
 
 	"github.com/pkg/errors"
 
-	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/options"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/phases/workflow"
 	cmdutil "k8s.io/kubernetes/cmd/kubeadm/app/cmd/util"
@@ -59,12 +58,6 @@ var (
 	}
 )
 
-type controlPlaneData interface {
-	Cfg() *kubeadmapi.InitConfiguration
-	KubeConfigDir() string
-	ManifestDir() string
-}
-
 func getPhaseDescription(component string) string {
 	return fmt.Sprintf("Generates the %s static Pod manifest", component)
 }
@@ -73,12 +66,12 @@ func getPhaseDescription(component string) string {
 func NewControlPlanePhase() workflow.Phase {
 	phase := workflow.Phase{
 		Name:  "control-plane",
-		Short: "Generates all static Pod manifest files necessary to establish the control plane",
+		Short: "Generate all static Pod manifest files necessary to establish the control plane",
 		Long:  cmdutil.MacroCommandLongDescription,
 		Phases: []workflow.Phase{
 			{
 				Name:           "all",
-				Short:          "Generates all static Pod manifest files",
+				Short:          "Generate all static Pod manifest files",
 				InheritFlags:   getControlPlanePhaseFlags("all"),
 				Example:        controlPlaneExample,
 				RunAllSiblings: true,
@@ -133,7 +126,7 @@ func getControlPlanePhaseFlags(name string) []string {
 }
 
 func runControlPlanePhase(c workflow.RunData) error {
-	data, ok := c.(controlPlaneData)
+	data, ok := c.(InitData)
 	if !ok {
 		return errors.New("control-plane phase invoked with an invalid data struct")
 	}
@@ -144,7 +137,7 @@ func runControlPlanePhase(c workflow.RunData) error {
 
 func runControlPlaneSubphase(component string) func(c workflow.RunData) error {
 	return func(c workflow.RunData) error {
-		data, ok := c.(controlPlaneData)
+		data, ok := c.(InitData)
 		if !ok {
 			return errors.New("control-plane phase invoked with an invalid data struct")
 		}

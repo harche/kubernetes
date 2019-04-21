@@ -38,9 +38,9 @@ var _ = Describe("[sig-network] Networking", func() {
 			This test is marked LinuxOnly since HostNetwork is not supported on other platforms like Windows.
 		*/
 		framework.ConformanceIt("should function for intra-pod communication: http [LinuxOnly] [NodeConformance]", func() {
-			config := framework.NewCoreNetworkingTestConfig(f)
+			config := framework.NewCoreNetworkingTestConfig(f, true)
 			for _, endpointPod := range config.EndpointPods {
-				config.DialFromTestContainer("http", endpointPod.Status.PodIP, framework.EndpointHttpPort, config.MaxTries, 0, sets.NewString(endpointPod.Name))
+				config.DialFromTestContainer("http", endpointPod.Status.PodIP, framework.EndpointHTTPPort, config.MaxTries, 0, sets.NewString(endpointPod.Name))
 			}
 		})
 
@@ -52,9 +52,9 @@ var _ = Describe("[sig-network] Networking", func() {
 			This test is marked LinuxOnly since HostNetwork is not supported on other platforms like Windows.
 		*/
 		framework.ConformanceIt("should function for intra-pod communication: udp [LinuxOnly] [NodeConformance]", func() {
-			config := framework.NewCoreNetworkingTestConfig(f)
+			config := framework.NewCoreNetworkingTestConfig(f, true)
 			for _, endpointPod := range config.EndpointPods {
-				config.DialFromTestContainer("udp", endpointPod.Status.PodIP, framework.EndpointUdpPort, config.MaxTries, 0, sets.NewString(endpointPod.Name))
+				config.DialFromTestContainer("udp", endpointPod.Status.PodIP, framework.EndpointUDPPort, config.MaxTries, 0, sets.NewString(endpointPod.Name))
 			}
 		})
 
@@ -66,9 +66,9 @@ var _ = Describe("[sig-network] Networking", func() {
 			This test is marked LinuxOnly since HostNetwork is not supported on other platforms like Windows.
 		*/
 		framework.ConformanceIt("should function for node-pod communication: http [LinuxOnly] [NodeConformance]", func() {
-			config := framework.NewCoreNetworkingTestConfig(f)
+			config := framework.NewCoreNetworkingTestConfig(f, true)
 			for _, endpointPod := range config.EndpointPods {
-				config.DialFromNode("http", endpointPod.Status.PodIP, framework.EndpointHttpPort, config.MaxTries, 0, sets.NewString(endpointPod.Name))
+				config.DialFromNode("http", endpointPod.Status.PodIP, framework.EndpointHTTPPort, config.MaxTries, 0, sets.NewString(endpointPod.Name))
 			}
 		})
 
@@ -80,9 +80,9 @@ var _ = Describe("[sig-network] Networking", func() {
 			This test is marked LinuxOnly since HostNetwork is not supported on other platforms like Windows.
 		*/
 		framework.ConformanceIt("should function for node-pod communication: udp [LinuxOnly] [NodeConformance]", func() {
-			config := framework.NewCoreNetworkingTestConfig(f)
+			config := framework.NewCoreNetworkingTestConfig(f, true)
 			for _, endpointPod := range config.EndpointPods {
-				config.DialFromNode("udp", endpointPod.Status.PodIP, framework.EndpointUdpPort, config.MaxTries, 0, sets.NewString(endpointPod.Name))
+				config.DialFromNode("udp", endpointPod.Status.PodIP, framework.EndpointUDPPort, config.MaxTries, 0, sets.NewString(endpointPod.Name))
 			}
 		})
 	})

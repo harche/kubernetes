@@ -29,6 +29,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	certutil "k8s.io/client-go/util/cert"
+	"k8s.io/client-go/util/keyutil"
 	"k8s.io/klog"
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
 	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
@@ -56,21 +57,6 @@ type kubeConfigSpec struct {
 	ClientName     string
 	TokenAuth      *tokenAuth
 	ClientCertAuth *clientCertAuth
-}
-
-// CreateInitKubeConfigFiles will create and write to disk all kubeconfig files necessary in the kubeadm init phase
-// to establish the control plane, including also the admin kubeconfig file.
-// If kubeconfig files already exists, they are used only if evaluated equal; otherwise an error is returned.
-func CreateInitKubeConfigFiles(outDir string, cfg *kubeadmapi.InitConfiguration) error {
-	klog.V(1).Infoln("creating all kubeconfig files")
-	return createKubeConfigFiles(
-		outDir,
-		cfg,
-		kubeadmconstants.AdminKubeConfigFileName,
-		kubeadmconstants.KubeletKubeConfigFileName,
-		kubeadmconstants.ControllerManagerKubeConfigFileName,
-		kubeadmconstants.SchedulerKubeConfigFileName,
-	)
 }
 
 // CreateJoinControlPlaneKubeConfigFiles will create and write to disk the kubeconfig files required by kubeadm
@@ -105,10 +91,10 @@ func createKubeConfigFiles(outDir string, cfg *kubeadmapi.InitConfiguration, kub
 	}
 
 	for _, kubeConfigFileName := range kubeConfigFileNames {
-		// retrives the KubeConfigSpec for given kubeConfigFileName
+		// retrieves the KubeConfigSpec for given kubeConfigFileName
 		spec, exists := specs[kubeConfigFileName]
 		if !exists {
-			return errors.Errorf("couldn't retrive KubeConfigSpec for %s", kubeConfigFileName)
+			return errors.Errorf("couldn't retrieve KubeConfigSpec for %s", kubeConfigFileName)
 		}
 
 		// builds the KubeConfig object
@@ -135,7 +121,7 @@ func getKubeConfigSpecs(cfg *kubeadmapi.InitConfiguration) (map[string]*kubeConf
 		return nil, errors.Wrap(err, "couldn't create a kubeconfig; the CA files couldn't be loaded")
 	}
 
-	masterEndpoint, err := kubeadmutil.GetMasterEndpoint(cfg.ControlPlaneEndpoint, &cfg.LocalAPIEndpoint)
+	controlPlaneEndpoint, err := kubeadmutil.GetControlPlaneEndpoint(cfg.ControlPlaneEndpoint, &cfg.LocalAPIEndpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -143,16 +129,16 @@ func getKubeConfigSpecs(cfg *kubeadmapi.InitConfiguration) (map[string]*kubeConf
 	var kubeConfigSpec = map[string]*kubeConfigSpec{
 		kubeadmconstants.AdminKubeConfigFileName: {
 			CACert:     caCert,
-			APIServer:  masterEndpoint,
+			APIServer:  controlPlaneEndpoint,
 			ClientName: "kubernetes-admin",
 			ClientCertAuth: &clientCertAuth{
 				CAKey:         caKey,
-				Organizations: []string{kubeadmconstants.MastersGroup},
+				Organizations: []string{kubeadmconstants.SystemPrivilegedGroup},
 			},
 		},
 		kubeadmconstants.KubeletKubeConfigFileName: {
 			CACert:     caCert,
-			APIServer:  masterEndpoint,
+			APIServer:  controlPlaneEndpoint,
 			ClientName: fmt.Sprintf("%s%s", kubeadmconstants.NodesUserPrefix, cfg.NodeRegistration.Name),
 			ClientCertAuth: &clientCertAuth{
 				CAKey:         caKey,
@@ -161,7 +147,7 @@ func getKubeConfigSpecs(cfg *kubeadmapi.InitConfiguration) (map[string]*kubeConf
 		},
 		kubeadmconstants.ControllerManagerKubeConfigFileName: {
 			CACert:     caCert,
-			APIServer:  masterEndpoint,
+			APIServer:  controlPlaneEndpoint,
 			ClientName: kubeadmconstants.ControllerManagerUser,
 			ClientCertAuth: &clientCertAuth{
 				CAKey: caKey,
@@ -169,7 +155,7 @@ func getKubeConfigSpecs(cfg *kubeadmapi.InitConfiguration) (map[string]*kubeConf
 		},
 		kubeadmconstants.SchedulerKubeConfigFileName: {
 			CACert:     caCert,
-			APIServer:  masterEndpoint,
+			APIServer:  controlPlaneEndpoint,
 			ClientName: kubeadmconstants.SchedulerUser,
 			ClientCertAuth: &clientCertAuth{
 				CAKey: caKey,
@@ -206,13 +192,17 @@ func buildKubeConfigFromSpec(spec *kubeConfigSpec, clustername string) (*clientc
 		return nil, errors.Wrapf(err, "failure while creating %s client certificate", spec.ClientName)
 	}
 
+	encodedClientKey, err := keyutil.MarshalPrivateKeyToPEM(clientKey)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to marshal private key to PEM")
+	}
 	// create a kubeconfig with the client certs
 	return kubeconfigutil.CreateWithCerts(
 		spec.APIServer,
 		clustername,
 		spec.ClientName,
 		pkiutil.EncodeCertPEM(spec.CACert),
-		certutil.EncodePrivateKeyPEM(clientKey),
+		encodedClientKey,
 		pkiutil.EncodeCertPEM(clientCert),
 	), nil
 }
@@ -285,14 +275,14 @@ func WriteKubeConfigWithClientCert(out io.Writer, cfg *kubeadmapi.InitConfigurat
 		return errors.Wrap(err, "couldn't create a kubeconfig; the CA files couldn't be loaded")
 	}
 
-	masterEndpoint, err := kubeadmutil.GetMasterEndpoint(cfg.ControlPlaneEndpoint, &cfg.LocalAPIEndpoint)
+	controlPlaneEndpoint, err := kubeadmutil.GetControlPlaneEndpoint(cfg.ControlPlaneEndpoint, &cfg.LocalAPIEndpoint)
 	if err != nil {
 		return err
 	}
 
 	spec := &kubeConfigSpec{
 		ClientName: clientName,
-		APIServer:  masterEndpoint,
+		APIServer:  controlPlaneEndpoint,
 		CACert:     caCert,
 		ClientCertAuth: &clientCertAuth{
 			CAKey:         caKey,
@@ -312,14 +302,14 @@ func WriteKubeConfigWithToken(out io.Writer, cfg *kubeadmapi.InitConfiguration, 
 		return errors.Wrap(err, "couldn't create a kubeconfig; the CA files couldn't be loaded")
 	}
 
-	masterEndpoint, err := kubeadmutil.GetMasterEndpoint(cfg.ControlPlaneEndpoint, &cfg.LocalAPIEndpoint)
+	controlPlaneEndpoint, err := kubeadmutil.GetControlPlaneEndpoint(cfg.ControlPlaneEndpoint, &cfg.LocalAPIEndpoint)
 	if err != nil {
 		return err
 	}
 
 	spec := &kubeConfigSpec{
 		ClientName: clientName,
-		APIServer:  masterEndpoint,
+		APIServer:  controlPlaneEndpoint,
 		CACert:     caCert,
 		TokenAuth: &tokenAuth{
 			Token: token,
@@ -357,24 +347,24 @@ func ValidateKubeconfigsForExternalCA(outDir string, cfg *kubeadmapi.InitConfigu
 		kubeadmconstants.SchedulerKubeConfigFileName,
 	}
 
-	specs, err := getKubeConfigSpecs(cfg)
+	// Creates a kubeconfig file with the target CA and server URL
+	// to be used as a input for validating user provided kubeconfig files
+	caCert, err := pkiutil.TryLoadCertFromDisk(cfg.CertificatesDir, kubeadmconstants.CACertAndKeyBaseName)
+	if err != nil {
+		return errors.Wrapf(err, "the CA file couldn't be loaded")
+	}
+
+	controlPlaneEndpoint, err := kubeadmutil.GetControlPlaneEndpoint(cfg.ControlPlaneEndpoint, &cfg.LocalAPIEndpoint)
 	if err != nil {
 		return err
 	}
 
+	validationConfig := kubeconfigutil.CreateBasic(controlPlaneEndpoint, "dummy", "dummy", pkiutil.EncodeCertPEM(caCert))
+
+	// validate user provided kubeconfig files
 	for _, kubeConfigFileName := range kubeConfigFileNames {
-		spec, exists := specs[kubeConfigFileName]
-		if !exists {
-			return errors.Errorf("couldn't retrive KubeConfigSpec for %s", kubeConfigFileName)
-		}
-
-		kubeconfig, err := buildKubeConfigFromSpec(spec, cfg.ClusterName)
-		if err != nil {
-			return err
-		}
-
-		if err = validateKubeConfig(outDir, kubeConfigFileName, kubeconfig); err != nil {
-			return err
+		if err = validateKubeConfig(outDir, kubeConfigFileName, validationConfig); err != nil {
+			return errors.Wrapf(err, "the %s file does not exists or it is not valid", kubeConfigFileName)
 		}
 	}
 	return nil

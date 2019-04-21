@@ -38,6 +38,7 @@ import (
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/kubernetes/pkg/cloudprovider/providers/azure/auth"
 
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-10-01/compute"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
 	"k8s.io/klog"
@@ -72,6 +73,8 @@ const (
 var (
 	// Master nodes are not added to standard load balancer by default.
 	defaultExcludeMasterFromStandardLB = true
+	// Outbound SNAT is enabled by default.
+	defaultDisableOutboundSNAT = false
 )
 
 // Config holds the configuration parsed from the --cloud-config flag
@@ -93,6 +96,8 @@ type Config struct {
 	SecurityGroupName string `json:"securityGroupName" yaml:"securityGroupName"`
 	// (Optional in 1.6) The name of the route table attached to the subnet that the cluster is deployed in
 	RouteTableName string `json:"routeTableName" yaml:"routeTableName"`
+	// The name of the resource group that the RouteTable is deployed in
+	RouteTableResourceGroup string `json:"routeTableResourceGroup" yaml:"routeTableResourceGroup"`
 	// (Optional) The name of the availability set that should be used as the load balancer backend
 	// If this is set, the Azure cloudprovider will only add nodes from that availability set to the load
 	// balancer backend pool. If this is not set, and multiple agent pools (availability sets) are used, then
@@ -144,6 +149,9 @@ type Config struct {
 	// ExcludeMasterFromStandardLB excludes master nodes from standard load balancer.
 	// If not set, it will be default to true.
 	ExcludeMasterFromStandardLB *bool `json:"excludeMasterFromStandardLB" yaml:"excludeMasterFromStandardLB"`
+	// DisableOutboundSNAT disables the outbound SNAT for public load balancer rules.
+	// It should only be set when loadBalancerSku is standard. If not set, it will be default to false.
+	DisableOutboundSNAT *bool `json:"disableOutboundSNAT" yaml:"disableOutboundSNAT"`
 
 	// Maximum allowed LoadBalancer Rule Count is the limit enforced by Azure Load balancer
 	MaximumLoadBalancerRuleCount int `json:"maximumLoadBalancerRuleCount" yaml:"maximumLoadBalancerRuleCount"`
@@ -170,6 +178,7 @@ type Cloud struct {
 	VirtualMachinesClient   VirtualMachinesClient
 	StorageAccountClient    StorageAccountClient
 	DisksClient             DisksClient
+	SnapshotsClient         *compute.SnapshotsClient
 	FileClient              FileClient
 	resourceRequestBackoff  wait.Backoff
 	metadata                *InstanceMetadataService
@@ -222,6 +231,10 @@ func NewCloud(configReader io.Reader) (cloudprovider.Interface, error) {
 	config, err := parseConfig(configReader)
 	if err != nil {
 		return nil, err
+	}
+
+	if config.RouteTableResourceGroup == "" {
+		config.RouteTableResourceGroup = config.ResourceGroup
 	}
 
 	if config.VMType == "" {
@@ -319,9 +332,20 @@ func NewCloud(configReader io.Reader) (cloudprovider.Interface, error) {
 		config.CloudProviderBackoffDuration = backoffDurationDefault
 	}
 
-	// Do not add master nodes to standard LB by default.
-	if config.ExcludeMasterFromStandardLB == nil {
-		config.ExcludeMasterFromStandardLB = &defaultExcludeMasterFromStandardLB
+	if strings.EqualFold(config.LoadBalancerSku, loadBalancerSkuStandard) {
+		// Do not add master nodes to standard LB by default.
+		if config.ExcludeMasterFromStandardLB == nil {
+			config.ExcludeMasterFromStandardLB = &defaultExcludeMasterFromStandardLB
+		}
+
+		// Enable outbound SNAT by default.
+		if config.DisableOutboundSNAT == nil {
+			config.DisableOutboundSNAT = &defaultDisableOutboundSNAT
+		}
+	} else {
+		if config.DisableOutboundSNAT != nil && *config.DisableOutboundSNAT {
+			return nil, fmt.Errorf("disableOutboundSNAT should only set when loadBalancerSku is standard")
+		}
 	}
 
 	azClientConfig := &azClientConfig{
@@ -344,6 +368,7 @@ func NewCloud(configReader io.Reader) (cloudprovider.Interface, error) {
 		resourceRequestBackoff: resourceRequestBackoff,
 
 		DisksClient:                     newAzDisksClient(azClientConfig),
+		SnapshotsClient:                 newSnapshotsClient(azClientConfig),
 		RoutesClient:                    newAzRoutesClient(azClientConfig),
 		SubnetsClient:                   newAzSubnetsClient(azClientConfig),
 		InterfacesClient:                newAzInterfacesClient(azClientConfig),
@@ -420,6 +445,9 @@ func parseConfig(configReader io.Reader) (*Config, error) {
 		return nil, err
 	}
 
+	// The resource group name may be in different cases from different Azure APIs, hence it is converted to lower here.
+	// See more context at https://github.com/kubernetes/kubernetes/issues/71994.
+	config.ResourceGroup = strings.ToLower(config.ResourceGroup)
 	return &config, nil
 }
 
@@ -487,22 +515,8 @@ func initDiskControllers(az *Cloud) error {
 		cloud:                 az,
 	}
 
-	// BlobDiskController: contains the function needed to
-	// create/attach/detach/delete blob based (unmanaged disks)
-	blobController, err := newBlobDiskController(common)
-	if err != nil {
-		return fmt.Errorf("AzureDisk -  failed to init Blob Disk Controller with error (%s)", err.Error())
-	}
-
-	// ManagedDiskController: contains the functions needed to
-	// create/attach/detach/delete managed disks
-	managedController, err := newManagedDiskController(common)
-	if err != nil {
-		return fmt.Errorf("AzureDisk -  failed to init Managed  Disk Controller with error (%s)", err.Error())
-	}
-
-	az.BlobDiskController = blobController
-	az.ManagedDiskController = managedController
+	az.BlobDiskController = &BlobDiskController{common: common}
+	az.ManagedDiskController = &ManagedDiskController{common: common}
 	az.controllerCommon = common
 
 	return nil
@@ -589,7 +603,7 @@ func (az *Cloud) updateNodeCaches(prevNode, newNode *v1.Node) {
 		// Add to nodeResourceGroups cache.
 		newRG, ok := newNode.ObjectMeta.Labels[externalResourceGroupLabel]
 		if ok && len(newRG) > 0 {
-			az.nodeResourceGroups[newNode.ObjectMeta.Name] = newRG
+			az.nodeResourceGroups[newNode.ObjectMeta.Name] = strings.ToLower(newRG)
 		}
 
 		// Add to unmanagedNodes cache.
@@ -688,7 +702,7 @@ func (az *Cloud) GetUnmanagedNodes() (sets.String, error) {
 // ShouldNodeExcludedFromLoadBalancer returns true if node is unmanaged or in external resource group.
 func (az *Cloud) ShouldNodeExcludedFromLoadBalancer(node *v1.Node) bool {
 	labels := node.ObjectMeta.Labels
-	if rg, ok := labels[externalResourceGroupLabel]; ok && rg != az.ResourceGroup {
+	if rg, ok := labels[externalResourceGroupLabel]; ok && !strings.EqualFold(rg, az.ResourceGroup) {
 		return true
 	}
 

@@ -40,6 +40,7 @@ source "${KUBE_ROOT}/test/cmd/diff.sh"
 source "${KUBE_ROOT}/test/cmd/discovery.sh"
 source "${KUBE_ROOT}/test/cmd/generic-resources.sh"
 source "${KUBE_ROOT}/test/cmd/get.sh"
+source "${KUBE_ROOT}/test/cmd/kubeadm.sh"
 source "${KUBE_ROOT}/test/cmd/kubeconfig.sh"
 source "${KUBE_ROOT}/test/cmd/node-management.sh"
 source "${KUBE_ROOT}/test/cmd/old-print.sh"
@@ -385,6 +386,26 @@ runTests() {
     kubectl get "${kube_flags[@]}" -f hack/testdata/kubernetes-service.yaml
   fi
 
+  cleanup_tests(){
+    kube::test::clear_all
+    if [[ -n "${foundError}" ]]; then
+      echo "FAILED TESTS: ""${foundError}"
+      exit 1
+    fi
+  }
+
+   if [[ -n "${WHAT-}" ]]; then
+    for pkg in ${WHAT}
+    do 
+      # running of kubeadm is captured in hack/make-targets/test-cmd.sh
+      if [[ "${pkg}" != "kubeadm" ]]; then 
+        record_command run_${pkg}_tests
+      fi
+    done
+    cleanup_tests
+    return
+  fi
+
   #########################
   # Kubectl version #
   #########################
@@ -491,6 +512,9 @@ runTests() {
   ######################
   if kube::test::if_supports_resource "${secrets}" ; then
     record_command run_create_secret_tests
+  fi
+  if kube::test::if_supports_resource "${deployments}"; then
+    record_command run_kubectl_create_kustomization_directory_tests
   fi
 
   ######################
@@ -737,6 +761,27 @@ runTests() {
 
     output_message=$(kubectl auth can-i get pods --subresource=log --quiet 2>&1 "${kube_flags[@]}"; echo $?)
     kube::test::if_has_string "${output_message}" '0'
+
+    # kubectl auth can-i get '*' does not warn about namespaced scope or print an error
+    output_message=$(kubectl auth can-i get '*' 2>&1 "${kube_flags[@]}")
+    kube::test::if_has_not_string "${output_message}" "Warning"
+
+    # kubectl auth can-i get foo does not print a namespaced warning message, and only prints a single lookup error
+    output_message=$(kubectl auth can-i get foo 2>&1 "${kube_flags[@]}")
+    kube::test::if_has_string "${output_message}" "Warning: the server doesn't have a resource type 'foo'"
+    kube::test::if_has_not_string "${output_message}" "Warning: resource 'foo' is not namespace scoped"
+
+    # kubectl auth can-i get pods does not print a namespaced warning message or a lookup error
+    output_message=$(kubectl auth can-i get pods 2>&1 "${kube_flags[@]}")
+    kube::test::if_has_not_string "${output_message}" "Warning"
+
+    # kubectl auth can-i get nodes prints a namespaced warning message
+    output_message=$(kubectl auth can-i get nodes 2>&1 "${kube_flags[@]}")
+    kube::test::if_has_string "${output_message}" "Warning: resource 'nodes' is not namespace scoped"
+
+    # kubectl auth can-i get nodes --all-namespaces does not print a namespaced warning message
+    output_message=$(kubectl auth can-i get nodes --all-namespaces 2>&1 "${kube_flags[@]}")
+    kube::test::if_has_not_string "${output_message}" "Warning: resource 'nodes' is not namespace scoped"
   fi
 
   # kubectl auth reconcile
@@ -836,6 +881,7 @@ runTests() {
 
   record_command run_plugins_tests
 
+
   #################
   # Impersonation #
   #################
@@ -847,10 +893,5 @@ runTests() {
 
   record_command run_wait_tests
 
-  kube::test::clear_all
-
-  if [[ -n "${foundError}" ]]; then
-    echo "FAILED TESTS: ""${foundError}"
-    exit 1
-  fi
+  cleanup_tests
 }

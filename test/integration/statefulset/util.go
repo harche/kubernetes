@@ -48,13 +48,6 @@ const (
 	fakeImage     = "fakeimage"
 )
 
-type statefulsetTester struct {
-	t           *testing.T
-	c           clientset.Interface
-	service     *v1.Service
-	statefulset *appsv1.StatefulSet
-}
-
 func labelMap() map[string]string {
 	return map[string]string{"foo": "bar"}
 }
@@ -199,7 +192,7 @@ func runControllerAndInformers(sc *statefulset.StatefulSetController, informers 
 }
 
 func createHeadlessService(t *testing.T, clientSet clientset.Interface, headlessService *v1.Service) {
-	_, err := clientSet.Core().Services(headlessService.Namespace).Create(headlessService)
+	_, err := clientSet.CoreV1().Services(headlessService.Namespace).Create(headlessService)
 	if err != nil {
 		t.Fatalf("failed creating headless service: %v", err)
 	}
@@ -216,7 +209,7 @@ func createSTSsPods(t *testing.T, clientSet clientset.Interface, stss []*appsv1.
 		createdSTSs = append(createdSTSs, createdSTS)
 	}
 	for _, pod := range pods {
-		createdPod, err := clientSet.Core().Pods(pod.Namespace).Create(pod)
+		createdPod, err := clientSet.CoreV1().Pods(pod.Namespace).Create(pod)
 		if err != nil {
 			t.Fatalf("failed to create pod %s: %v", pod.Name, err)
 		}

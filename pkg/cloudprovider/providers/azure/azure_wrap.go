@@ -37,7 +37,8 @@ var (
 	nsgCacheTTL = 2 * time.Minute
 	rtCacheTTL  = 2 * time.Minute
 
-	azureNodeProviderIDRE = regexp.MustCompile(`^azure:///subscriptions/(?:.*)/resourceGroups/(?:.*)/providers/Microsoft.Compute/(?:.*)`)
+	azureNodeProviderIDRE    = regexp.MustCompile(`^azure:///subscriptions/(?:.*)/resourceGroups/(?:.*)/providers/Microsoft.Compute/(?:.*)`)
+	azureResourceGroupNameRE = regexp.MustCompile(`.*/subscriptions/(?:.*)/resourceGroups/(.+)/providers/(?:.*)`)
 )
 
 // checkExistsFromError inspects an error and returns a true if err is nil,
@@ -65,6 +66,19 @@ func ignoreStatusNotFoundFromError(err error) error {
 	}
 	v, ok := err.(autorest.DetailedError)
 	if ok && v.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	return err
+}
+
+// ignoreStatusForbiddenFromError returns nil if the status code is StatusForbidden.
+// This happens when AuthorizationFailed is reported from Azure API.
+func ignoreStatusForbiddenFromError(err error) error {
+	if err == nil {
+		return nil
+	}
+	v, ok := err.(autorest.DetailedError)
+	if ok && v.StatusCode == http.StatusForbidden {
 		return nil
 	}
 	return err
@@ -261,7 +275,7 @@ func (az *Cloud) newRouteTableCache() (*timedCache, error) {
 	getter := func(key string) (interface{}, error) {
 		ctx, cancel := getContextWithCancel()
 		defer cancel()
-		rt, err := az.RouteTablesClient.Get(ctx, az.ResourceGroup, key, "")
+		rt, err := az.RouteTablesClient.Get(ctx, az.RouteTableResourceGroup, key, "")
 		exists, message, realErr := checkResourceExistsFromError(err)
 		if realErr != nil {
 			return nil, realErr
@@ -286,6 +300,14 @@ func (az *Cloud) excludeMasterNodesFromStandardLB() bool {
 	return az.ExcludeMasterFromStandardLB != nil && *az.ExcludeMasterFromStandardLB
 }
 
+func (az *Cloud) disableLoadBalancerOutboundSNAT() bool {
+	if !az.useStandardLoadBalancer() || az.DisableOutboundSNAT == nil {
+		return false
+	}
+
+	return *az.DisableOutboundSNAT
+}
+
 // IsNodeUnmanaged returns true if the node is not managed by Azure cloud provider.
 // Those nodes includes on-prem or VMs from other clouds. They will not be added to load balancer
 // backends. Azure routes and managed disks are also not supported for them.
@@ -302,4 +324,41 @@ func (az *Cloud) IsNodeUnmanaged(nodeName string) (bool, error) {
 // All managed node's providerIDs are in format 'azure:///subscriptions/<id>/resourceGroups/<rg>/providers/Microsoft.Compute/.*'
 func (az *Cloud) IsNodeUnmanagedByProviderID(providerID string) bool {
 	return !azureNodeProviderIDRE.Match([]byte(providerID))
+}
+
+// convertResourceGroupNameToLower converts the resource group name in the resource ID to be lowered.
+func convertResourceGroupNameToLower(resourceID string) (string, error) {
+	matches := azureResourceGroupNameRE.FindStringSubmatch(resourceID)
+	if len(matches) != 2 {
+		return "", fmt.Errorf("%q isn't in Azure resource ID format %q", resourceID, azureResourceGroupNameRE.String())
+	}
+
+	resourceGroup := matches[1]
+	return strings.Replace(resourceID, resourceGroup, strings.ToLower(resourceGroup), 1), nil
+}
+
+// isBackendPoolOnSameLB checks whether newBackendPoolID is on the same load balancer as existingBackendPools.
+// Since both public and internal LBs are supported, lbName and lbName-internal are treated as same.
+// If not same, the lbName for existingBackendPools would also be returned.
+func isBackendPoolOnSameLB(newBackendPoolID string, existingBackendPools []string) (bool, string, error) {
+	matches := backendPoolIDRE.FindStringSubmatch(newBackendPoolID)
+	if len(matches) != 2 {
+		return false, "", fmt.Errorf("new backendPoolID %q is in wrong format", newBackendPoolID)
+	}
+
+	newLBName := matches[1]
+	newLBNameTrimmed := strings.TrimRight(newLBName, InternalLoadBalancerNameSuffix)
+	for _, backendPool := range existingBackendPools {
+		matches := backendPoolIDRE.FindStringSubmatch(backendPool)
+		if len(matches) != 2 {
+			return false, "", fmt.Errorf("existing backendPoolID %q is in wrong format", backendPool)
+		}
+
+		lbName := matches[1]
+		if !strings.EqualFold(strings.TrimRight(lbName, InternalLoadBalancerNameSuffix), newLBNameTrimmed) {
+			return false, lbName, nil
+		}
+	}
+
+	return true, "", nil
 }

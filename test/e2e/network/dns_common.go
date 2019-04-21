@@ -53,7 +53,7 @@ type dnsTestCommon struct {
 	cm *v1.ConfigMap
 }
 
-func newDnsTestCommon() dnsTestCommon {
+func newDNSTestCommon() dnsTestCommon {
 	return dnsTestCommon{
 		f:  framework.NewDefaultFramework("dns-config-map"),
 		ns: "kube-system",
@@ -137,9 +137,8 @@ func (t *dnsTestCommon) runDig(dnsName, target string) []string {
 
 	if stdout == "" {
 		return []string{}
-	} else {
-		return strings.Split(stdout, "\n")
 	}
+	return strings.Split(stdout, "\n")
 }
 
 func (t *dnsTestCommon) setConfigMap(cm *v1.ConfigMap) {
@@ -494,7 +493,7 @@ func createProbeCommand(namesToResolve []string, hostEntries []string, ptrLookup
 // createTargetedProbeCommand returns a command line that performs a DNS lookup for a specific record type
 func createTargetedProbeCommand(nameToResolve string, lookup string, fileNamePrefix string) (string, string) {
 	fileName := fmt.Sprintf("%s_udp@%s", fileNamePrefix, nameToResolve)
-	probeCmd := fmt.Sprintf("dig +short +tries=12 %s %s > /results/%s", nameToResolve, lookup, fileName)
+	probeCmd := fmt.Sprintf("for i in `seq 1 30`; do dig +short %s %s > /results/%s; sleep 1; done", nameToResolve, lookup, fileName)
 	return probeCmd, fileName
 }
 

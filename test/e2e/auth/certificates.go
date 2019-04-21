@@ -22,14 +22,15 @@ import (
 	"encoding/pem"
 	"time"
 
-	. "github.com/onsi/ginkgo"
 	"k8s.io/api/certificates/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	v1beta1client "k8s.io/client-go/kubernetes/typed/certificates/v1beta1"
 	"k8s.io/client-go/util/cert"
-	pkiutil "k8s.io/kubernetes/cmd/kubeadm/app/util/pkiutil"
 	"k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/kubernetes/test/utils"
+
+	. "github.com/onsi/ginkgo"
 )
 
 var _ = SIGDescribe("Certificates API", func() {
@@ -38,7 +39,7 @@ var _ = SIGDescribe("Certificates API", func() {
 	It("should support building a client with a CSR", func() {
 		const commonName = "tester-csr"
 
-		pk, err := pkiutil.NewPrivateKey()
+		pk, err := utils.NewPrivateKey()
 		framework.ExpectNoError(err)
 
 		pkder := x509.MarshalPKCS1PrivateKey(pk)

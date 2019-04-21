@@ -81,7 +81,7 @@ type podTolerationsPlugin struct {
 // instead if specified. Tolerations to a namespace are assigned via
 // scheduler.alpha.kubernetes.io/defaultTolerations and scheduler.alpha.kubernetes.io/tolerationsWhitelist
 // annotations keys.
-func (p *podTolerationsPlugin) Admit(a admission.Attributes) error {
+func (p *podTolerationsPlugin) Admit(a admission.Attributes, o admission.ObjectInterfaces) error {
 	if shouldIgnore(a) {
 		return nil
 	}
@@ -132,11 +132,12 @@ func (p *podTolerationsPlugin) Admit(a admission.Attributes) error {
 			},
 		})
 	}
-	pod.Spec.Tolerations = finalTolerations
-
-	return p.Validate(a)
+	// Final merge of tolerations irrespective of pod type, if the user while creating pods gives
+	// conflicting tolerations(with same key+effect), the existing ones should be overwritten by latest one
+	pod.Spec.Tolerations = tolerations.MergeTolerations(finalTolerations, []api.Toleration{})
+	return p.Validate(a, o)
 }
-func (p *podTolerationsPlugin) Validate(a admission.Attributes) error {
+func (p *podTolerationsPlugin) Validate(a admission.Attributes, o admission.ObjectInterfaces) error {
 	if shouldIgnore(a) {
 		return nil
 	}

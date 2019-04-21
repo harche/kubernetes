@@ -235,7 +235,7 @@ func verifyContentOfVSpherePV(client clientset.Interface, pvc *v1.PersistentVolu
 	framework.Logf("Successfully verified content of the volume")
 }
 
-func getVSphereStorageClassSpec(name string, scParameters map[string]string) *storage.StorageClass {
+func getVSphereStorageClassSpec(name string, scParameters map[string]string, zones []string) *storage.StorageClass {
 	var sc *storage.StorageClass
 
 	sc = &storage.StorageClass{
@@ -249,6 +249,17 @@ func getVSphereStorageClassSpec(name string, scParameters map[string]string) *st
 	}
 	if scParameters != nil {
 		sc.Parameters = scParameters
+	}
+	if zones != nil {
+		term := v1.TopologySelectorTerm{
+			MatchLabelExpressions: []v1.TopologySelectorLabelRequirement{
+				{
+					Key:    v1.LabelZoneFailureDomain,
+					Values: zones,
+				},
+			},
+		}
+		sc.AllowedTopologies = append(sc.AllowedTopologies, term)
 	}
 	return sc
 }
@@ -372,14 +383,14 @@ func getVSpherePodSpecWithVolumePaths(volumePaths []string, keyValuelabel map[st
 func verifyFilesExistOnVSphereVolume(namespace string, podName string, filePaths ...string) {
 	for _, filePath := range filePaths {
 		_, err := framework.RunKubectl("exec", fmt.Sprintf("--namespace=%s", namespace), podName, "--", "/bin/ls", filePath)
-		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("failed to verify file: %q on the pod: %q", filePath, podName))
+		framework.ExpectNoError(err, fmt.Sprintf("failed to verify file: %q on the pod: %q", filePath, podName))
 	}
 }
 
 func createEmptyFilesOnVSphereVolume(namespace string, podName string, filePaths []string) {
 	for _, filePath := range filePaths {
 		err := framework.CreateEmptyFileOnPod(namespace, podName, filePath)
-		Expect(err).NotTo(HaveOccurred())
+		framework.ExpectNoError(err)
 	}
 }
 
@@ -390,21 +401,54 @@ func verifyVSphereVolumesAccessible(c clientset.Interface, pod *v1.Pod, persiste
 	for index, pv := range persistentvolumes {
 		// Verify disks are attached to the node
 		isAttached, err := diskIsAttached(pv.Spec.VsphereVolume.VolumePath, nodeName)
-		Expect(err).NotTo(HaveOccurred())
+		framework.ExpectNoError(err)
 		Expect(isAttached).To(BeTrue(), fmt.Sprintf("disk %v is not attached with the node", pv.Spec.VsphereVolume.VolumePath))
 		// Verify Volumes are accessible
 		filepath := filepath.Join("/mnt/", fmt.Sprintf("volume%v", index+1), "/emptyFile.txt")
 		_, err = framework.LookForStringInPodExec(namespace, pod.Name, []string{"/bin/touch", filepath}, "", time.Minute)
-		Expect(err).NotTo(HaveOccurred())
+		framework.ExpectNoError(err)
+	}
+}
+
+// verify volumes are created on one of the specified zones
+func verifyVolumeCreationOnRightZone(persistentvolumes []*v1.PersistentVolume, nodeName string, zones []string) {
+	for _, pv := range persistentvolumes {
+		volumePath := pv.Spec.VsphereVolume.VolumePath
+		// Extract datastoreName from the volume path in the pv spec
+		// For example : "vsanDatastore" is extracted from "[vsanDatastore] 25d8b159-948c-4b73-e499-02001ad1b044/volume.vmdk"
+		datastorePathObj, _ := getDatastorePathObjFromVMDiskPath(volumePath)
+		datastoreName := datastorePathObj.Datastore
+		nodeInfo := TestContext.NodeMapper.GetNodeInfo(nodeName)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		// Get the datastore object reference from the datastore name
+		datastoreRef, err := nodeInfo.VSphere.GetDatastoreRefFromName(ctx, nodeInfo.DataCenterRef, datastoreName)
+		if err != nil {
+			framework.ExpectNoError(err)
+		}
+		// Find common datastores among the specified zones
+		var datastoreCountMap = make(map[string]int)
+		numZones := len(zones)
+		var commonDatastores []string
+		for _, zone := range zones {
+			datastoreInZone := TestContext.NodeMapper.GetDatastoresInZone(nodeInfo.VSphere.Config.Hostname, zone)
+			for _, datastore := range datastoreInZone {
+				datastoreCountMap[datastore] = datastoreCountMap[datastore] + 1
+				if datastoreCountMap[datastore] == numZones {
+					commonDatastores = append(commonDatastores, datastore)
+				}
+			}
+		}
+		Expect(commonDatastores).To(ContainElement(datastoreRef.Value), "PV was created in an unsupported zone.")
 	}
 }
 
 // Get vSphere Volume Path from PVC
 func getvSphereVolumePathFromClaim(client clientset.Interface, namespace string, claimName string) string {
 	pvclaim, err := client.CoreV1().PersistentVolumeClaims(namespace).Get(claimName, metav1.GetOptions{})
-	Expect(err).NotTo(HaveOccurred())
+	framework.ExpectNoError(err)
 	pv, err := client.CoreV1().PersistentVolumes().Get(pvclaim.Spec.VolumeName, metav1.GetOptions{})
-	Expect(err).NotTo(HaveOccurred())
+	framework.ExpectNoError(err)
 	return pv.Spec.VsphereVolume.VolumePath
 }
 
@@ -584,7 +628,7 @@ func getVMXFilePath(vmObject *object.VirtualMachine) (vmxPath string) {
 
 	var nodeVM mo.VirtualMachine
 	err := vmObject.Properties(ctx, vmObject.Reference(), []string{"config.files"}, &nodeVM)
-	Expect(err).NotTo(HaveOccurred())
+	framework.ExpectNoError(err)
 	Expect(nodeVM.Config).NotTo(BeNil())
 
 	vmxPath = nodeVM.Config.Files.VmPathName
@@ -616,9 +660,9 @@ func poweroffNodeVM(nodeName string, vm *object.VirtualMachine) {
 	framework.Logf("Powering off node VM %s", nodeName)
 
 	_, err := vm.PowerOff(ctx)
-	Expect(err).NotTo(HaveOccurred())
+	framework.ExpectNoError(err)
 	err = vm.WaitForPowerState(ctx, vim25types.VirtualMachinePowerStatePoweredOff)
-	Expect(err).NotTo(HaveOccurred(), "Unable to power off the node")
+	framework.ExpectNoError(err, "Unable to power off the node")
 }
 
 // poweron nodeVM and confirm the poweron state
@@ -630,7 +674,7 @@ func poweronNodeVM(nodeName string, vm *object.VirtualMachine) {
 
 	vm.PowerOn(ctx)
 	err := vm.WaitForPowerState(ctx, vim25types.VirtualMachinePowerStatePoweredOn)
-	Expect(err).NotTo(HaveOccurred(), "Unable to power on the node")
+	framework.ExpectNoError(err, "Unable to power on the node")
 }
 
 // unregister a nodeVM from VC
@@ -642,7 +686,7 @@ func unregisterNodeVM(nodeName string, vm *object.VirtualMachine) {
 
 	framework.Logf("Unregistering node VM %s", nodeName)
 	err := vm.Unregister(ctx)
-	Expect(err).NotTo(HaveOccurred(), "Unable to unregister the node")
+	framework.ExpectNoError(err, "Unable to unregister the node")
 }
 
 // register a nodeVM into a VC
@@ -656,16 +700,16 @@ func registerNodeVM(nodeName, workingDir, vmxFilePath string, rpool *object.Reso
 	finder := find.NewFinder(nodeInfo.VSphere.Client.Client, false)
 
 	vmFolder, err := finder.FolderOrDefault(ctx, workingDir)
-	Expect(err).NotTo(HaveOccurred())
+	framework.ExpectNoError(err)
 
 	registerTask, err := vmFolder.RegisterVM(ctx, vmxFilePath, nodeName, false, rpool, host)
-	Expect(err).NotTo(HaveOccurred())
+	framework.ExpectNoError(err)
 	err = registerTask.Wait(ctx)
-	Expect(err).NotTo(HaveOccurred())
+	framework.ExpectNoError(err)
 
 	vmPath := filepath.Join(workingDir, nodeName)
 	vm, err := finder.VirtualMachine(ctx, vmPath)
-	Expect(err).NotTo(HaveOccurred())
+	framework.ExpectNoError(err)
 
 	poweronNodeVM(nodeName, vm)
 }
@@ -768,7 +812,7 @@ func invokeVCenterServiceControl(command, service, host string) error {
 // Node, else fails.
 func expectVolumeToBeAttached(nodeName, volumePath string) {
 	isAttached, err := diskIsAttached(volumePath, nodeName)
-	Expect(err).NotTo(HaveOccurred())
+	framework.ExpectNoError(err)
 	Expect(isAttached).To(BeTrue(), fmt.Sprintf("disk: %s is not attached with the node", volumePath))
 }
 
@@ -806,7 +850,7 @@ func writeContentToPodFile(namespace, podName, filePath, content string) error {
 func expectFileContentToMatch(namespace, podName, filePath, content string) {
 	_, err := framework.RunKubectl("exec", fmt.Sprintf("--namespace=%s", namespace), podName,
 		"--", "/bin/sh", "-c", fmt.Sprintf("grep '%s' %s", content, filePath))
-	Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("failed to match content of file: %q on the pod: %q", filePath, podName))
+	framework.ExpectNoError(err, fmt.Sprintf("failed to match content of file: %q on the pod: %q", filePath, podName))
 }
 
 // expectFileContentsToMatch checks if the given contents match the ones present

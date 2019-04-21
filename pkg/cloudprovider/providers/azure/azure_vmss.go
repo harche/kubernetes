@@ -185,7 +185,13 @@ func (ss *scaleSet) GetInstanceIDByNodeName(name string) (string, error) {
 		return "", err
 	}
 
-	return *vm.ID, nil
+	resourceID := *vm.ID
+	convertedResourceID, err := convertResourceGroupNameToLower(resourceID)
+	if err != nil {
+		klog.Errorf("convertResourceGroupNameToLower failed with error: %v", err)
+		return "", err
+	}
+	return convertedResourceID, nil
 }
 
 // GetNodeNameByProviderID gets the node name by provider ID.
@@ -779,16 +785,19 @@ func (ss *scaleSet) ensureHostsInVMSetPool(service *v1.Service, backendPoolID st
 			// the same network interface couldn't be added to more than one load balancer of
 			// the same type. Omit those nodes (e.g. masters) so Azure ARM won't complain
 			// about this.
+			newBackendPoolsIDs := make([]string, 0, len(newBackendPools))
 			for _, pool := range newBackendPools {
-				backendPool := *pool.ID
-				matches := backendPoolIDRE.FindStringSubmatch(backendPool)
-				if len(matches) == 2 {
-					lbName := matches[1]
-					if strings.HasSuffix(lbName, InternalLoadBalancerNameSuffix) == isInternal {
-						klog.V(4).Infof("vmss %q has already been added to LB %q, omit adding it to a new one", vmSetName, lbName)
-						return nil
-					}
+				if pool.ID != nil {
+					newBackendPoolsIDs = append(newBackendPoolsIDs, *pool.ID)
 				}
+			}
+			isSameLB, oldLBName, err := isBackendPoolOnSameLB(backendPoolID, newBackendPoolsIDs)
+			if err != nil {
+				return err
+			}
+			if !isSameLB {
+				klog.V(4).Infof("VMSS %q has already been added to LB %q, omit adding it to a new one", vmSetName, oldLBName)
+				return nil
 			}
 		}
 
@@ -980,7 +989,7 @@ func (az *Cloud) getVmssMachineID(resourceGroup, scaleSetName, instanceID string
 	return fmt.Sprintf(
 		vmssMachineIDTemplate,
 		az.SubscriptionID,
-		resourceGroup,
+		strings.ToLower(resourceGroup),
 		scaleSetName,
 		instanceID)
 }
