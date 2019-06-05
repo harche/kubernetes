@@ -327,6 +327,7 @@ var map_Container = map[string]string{
 	"":                         "A single application container that you want to run within a pod.",
 	"name":                     "Name of the container specified as a DNS_LABEL. Each container in a pod must have a unique name (DNS_LABEL). Cannot be updated.",
 	"image":                    "Docker image name. More info: https://kubernetes.io/docs/concepts/containers/images This field is optional to allow higher level config management to default or override container images in workload controllers like Deployments and StatefulSets.",
+	"imageDecryptSecrets":      "ImageDecryptSecrets is an optional list of references to secrets in the same namespace to use for decrypting any of the encrypted images used by this PodSpec. If specified, these secrets will be passed to individual puller implementations for them to use.",
 	"command":                  "Entrypoint array. Not executed within a shell. The docker image's ENTRYPOINT is used if this is not provided. Variable references $(VAR_NAME) are expanded using the container's environment. If a variable cannot be resolved, the reference in the input string will be unchanged. The $(VAR_NAME) syntax can be escaped with a double $$, ie: $$(VAR_NAME). Escaped references will never be expanded, regardless of whether the variable exists or not. Cannot be updated. More info: https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/#running-a-command-in-a-shell",
 	"args":                     "Arguments to the entrypoint. The docker image's CMD is used if this is not provided. Variable references $(VAR_NAME) are expanded using the container's environment. If a variable cannot be resolved, the reference in the input string will be unchanged. The $(VAR_NAME) syntax can be escaped with a double $$, ie: $$(VAR_NAME). Escaped references will never be expanded, regardless of whether the variable exists or not. Cannot be updated. More info: https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/#running-a-command-in-a-shell",
 	"workingDir":               "Container's working directory. If not specified, the container runtime's default will be used, which might be configured in the container image. Cannot be updated.",
@@ -822,6 +823,16 @@ var map_ISCSIVolumeSource = map[string]string{
 
 func (ISCSIVolumeSource) SwaggerDoc() map[string]string {
 	return map_ISCSIVolumeSource
+}
+
+var map_ImageDecryptServiceSecret = map[string]string{
+	"":       "ImageDecryptServiceSecret holds the name of the decrypt secret and the corresponding list of images that can be decrypted using that secret.",
+	"name":   "Required.",
+	"images": "Required.",
+}
+
+func (ImageDecryptServiceSecret) SwaggerDoc() map[string]string {
+	return map_ImageDecryptServiceSecret
 }
 
 var map_KeyToPath = map[string]string{
@@ -2051,6 +2062,7 @@ var map_ServiceAccount = map[string]string{
 	"metadata":                     "Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/api-conventions.md#metadata",
 	"secrets":                      "Secrets is the list of secrets allowed to be used by pods running using this ServiceAccount. More info: https://kubernetes.io/docs/concepts/configuration/secret",
 	"imagePullSecrets":             "ImagePullSecrets is a list of references to secrets in the same namespace to use for pulling any images in pods that reference this ServiceAccount. ImagePullSecrets are distinct from Secrets because Secrets can be mounted in the pod, but ImagePullSecrets are only accessed by the kubelet. More info: https://kubernetes.io/docs/concepts/containers/images/#specifying-imagepullsecrets-on-a-pod",
+	"imageDecryptSecrets":          "ImageDecryptSecrets is a list of references to secrets in the same namespace to use for decrypting any encrypted images in pods that reference this ServiceAccount. ImageDecryptSecrets are distinct from Secrets because Secrets can be mounted in the pod, but ImageDecryptSecrets are only accessed by the kubelet.",
 	"automountServiceAccountToken": "AutomountServiceAccountToken indicates whether pods running as this service account should have an API token automatically mounted. Can be overridden at the pod level.",
 }
 

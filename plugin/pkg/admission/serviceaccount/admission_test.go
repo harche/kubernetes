@@ -684,6 +684,45 @@ func TestAllowUnreferencedSecretVolumesForPermissiveSAs(t *testing.T) {
 	}
 }
 
+func TestAllowsReferencedImageDecryptSecrets(t *testing.T) {
+	ns := "myns"
+
+	admit := NewServiceAccount()
+	informerFactory := informers.NewSharedInformerFactory(nil, controller.NoResyncPeriodFunc())
+	admit.SetExternalKubeInformerFactory(informerFactory)
+	admit.LimitSecretReferences = true
+	admit.RequireAPIToken = false
+
+	// Add the default service account for the ns with a secret reference into the cache
+	informerFactory.Core().V1().ServiceAccounts().Informer().GetStore().Add(&corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      DefaultServiceAccountName,
+			Namespace: ns,
+		},
+		ImageDecryptSecrets: []corev1.ImageDecryptServiceSecret{
+			{
+				Name:   "foo",
+				Images: []string{"image1"},
+			},
+		},
+	})
+
+	pod := &api.Pod{
+		Spec: api.PodSpec{
+			Containers: []api.Container{
+				{
+					Image:               "image1",
+					ImageDecryptSecrets: []api.LocalObjectReference{{Name: "foo"}},
+				},
+			},
+		},
+	}
+	attrs := admission.NewAttributesRecord(pod, nil, api.Kind("Pod").WithVersion("version"), ns, "myname", api.Resource("pods").WithVersion("version"), "", admission.Create, &metav1.CreateOptions{}, false, nil)
+	err := admissiontesting.WithReinvocationTesting(t, admit).Admit(attrs, nil)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
 func TestAllowsReferencedImagePullSecrets(t *testing.T) {
 	ns := "myns"
 
@@ -716,6 +755,40 @@ func TestAllowsReferencedImagePullSecrets(t *testing.T) {
 	}
 }
 
+func TestRejectsUnreferencedImageDecryptSecrets(t *testing.T) {
+	ns := "myns"
+
+	admit := NewServiceAccount()
+	informerFactory := informers.NewSharedInformerFactory(nil, controller.NoResyncPeriodFunc())
+	admit.SetExternalKubeInformerFactory(informerFactory)
+	admit.LimitSecretReferences = true
+	admit.RequireAPIToken = false
+
+	// Add the default service account for the ns into the cache
+	informerFactory.Core().V1().ServiceAccounts().Informer().GetStore().Add(&corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      DefaultServiceAccountName,
+			Namespace: ns,
+		},
+	})
+
+	pod := &api.Pod{
+		Spec: api.PodSpec{
+			Containers: []api.Container{
+				{
+					Image:               "image1",
+					ImageDecryptSecrets: []api.LocalObjectReference{{Name: "foo"}},
+				},
+			},
+		},
+	}
+	attrs := admission.NewAttributesRecord(pod, nil, api.Kind("Pod").WithVersion("version"), ns, "myname", api.Resource("pods").WithVersion("version"), "", admission.Create, &metav1.CreateOptions{}, false, nil)
+	err := admissiontesting.WithReinvocationTesting(t, admit).Admit(attrs, nil)
+	if err == nil {
+		t.Errorf("Expected rejection for using a secret the service account does not reference")
+	}
+}
+
 func TestRejectsUnreferencedImagePullSecrets(t *testing.T) {
 	ns := "myns"
 
@@ -745,6 +818,54 @@ func TestRejectsUnreferencedImagePullSecrets(t *testing.T) {
 	}
 }
 
+func TestDoNotAddImageDecryptSecrets(t *testing.T) {
+	ns := "myns"
+
+	admit := NewServiceAccount()
+	informerFactory := informers.NewSharedInformerFactory(nil, controller.NoResyncPeriodFunc())
+	admit.SetExternalKubeInformerFactory(informerFactory)
+	admit.LimitSecretReferences = true
+	admit.RequireAPIToken = false
+
+	// Add the default service account for the ns with a secret reference into the cache
+	informerFactory.Core().V1().ServiceAccounts().Informer().GetStore().Add(&corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      DefaultServiceAccountName,
+			Namespace: ns,
+		},
+		ImageDecryptSecrets: []corev1.ImageDecryptServiceSecret{
+			{
+				Name:   "foo",
+				Images: []string{"image1"},
+			},
+			{
+				Name:   "bar",
+				Images: []string{"image2"},
+			},
+		},
+	})
+
+	pod := &api.Pod{
+		Spec: api.PodSpec{
+			Containers: []api.Container{
+				{
+					Name:  "container-1",
+					Image: "image1",
+				},
+			},
+		},
+	}
+
+	attrs := admission.NewAttributesRecord(pod, nil, api.Kind("Pod").WithVersion("version"), ns, "myname", api.Resource("pods").WithVersion("version"), "", admission.Create, &metav1.CreateOptions{}, false, nil)
+	err := admissiontesting.WithReinvocationTesting(t, admit).Admit(attrs, nil)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if len(pod.Spec.Containers[0].ImageDecryptSecrets) != 1 || pod.Spec.Containers[0].ImageDecryptSecrets[0].Name != "foo" {
+		t.Errorf("unexpected image decrypt secrets: %v", pod.Spec.Containers[0].ImageDecryptSecrets)
+	}
+}
 func TestDoNotAddImagePullSecrets(t *testing.T) {
 	ns := "myns"
 
@@ -780,6 +901,51 @@ func TestDoNotAddImagePullSecrets(t *testing.T) {
 	if len(pod.Spec.ImagePullSecrets) != 1 || pod.Spec.ImagePullSecrets[0].Name != "foo" {
 		t.Errorf("unexpected image pull secrets: %v", pod.Spec.ImagePullSecrets)
 	}
+}
+
+func TestAddImageDecryptSecrets(t *testing.T) {
+	ns := "myns"
+
+	admit := NewServiceAccount()
+	informerFactory := informers.NewSharedInformerFactory(nil, controller.NoResyncPeriodFunc())
+	admit.SetExternalKubeInformerFactory(informerFactory)
+	admit.LimitSecretReferences = true
+	admit.RequireAPIToken = false
+
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      DefaultServiceAccountName,
+			Namespace: ns,
+		},
+		ImageDecryptSecrets: []corev1.ImageDecryptServiceSecret{
+			{
+				Name:   "decrypt",
+				Images: []string{"image1"},
+			},
+		},
+	}
+	// Add the default service account for the ns with a secret reference into the cache
+	informerFactory.Core().V1().ServiceAccounts().Informer().GetStore().Add(sa)
+
+	pod := &api.Pod{
+		Spec: api.PodSpec{
+			Containers: []api.Container{
+				{
+					Name:  "container-1",
+					Image: "image1",
+				},
+			},
+		},
+	}
+
+	attrs := admission.NewAttributesRecord(pod, nil, api.Kind("Pod").WithVersion("version"), ns, "myname", api.Resource("pods").WithVersion("version"), "", admission.Create, &metav1.CreateOptions{}, false, nil)
+	err := admissiontesting.WithReinvocationTesting(t, admit).Admit(attrs, nil)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	assert.EqualValues(t, sa.ImageDecryptSecrets[0].Name, pod.Spec.Containers[0].ImageDecryptSecrets[0].Name,
+		"expected %v, got %v", sa.ImageDecryptSecrets[0].Name, pod.Spec.Containers[0].ImageDecryptSecrets[0].Name)
 }
 
 func TestAddImagePullSecrets(t *testing.T) {
