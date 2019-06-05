@@ -328,8 +328,9 @@ type envSecrets struct {
 }
 
 type secretsToAttach struct {
-	imagePullSecretNames []string
-	containerEnvSecrets  []envSecrets
+	imagePullSecretNames    []string
+	ImageDecryptSecretNames []string
+	containerEnvSecrets     []envSecrets
 }
 
 func podWithSecrets(ns, podName string, toAttach secretsToAttach) *v1.Pod {
@@ -347,6 +348,10 @@ func podWithSecrets(ns, podName string, toAttach secretsToAttach) *v1.Pod {
 	for i, secrets := range toAttach.containerEnvSecrets {
 		container := v1.Container{
 			Name: fmt.Sprintf("container-%d", i),
+		}
+		for _, name := range toAttach.ImageDecryptSecretNames {
+			container.ImageDecryptSecrets = append(container.ImageDecryptSecrets,
+				v1.LocalObjectReference{Name: name})
 		}
 		for _, name := range secrets.envFromNames {
 			envFrom := v1.EnvFromSource{
@@ -382,7 +387,8 @@ func TestCacheInvalidation(t *testing.T) {
 
 	// Create a pod with some secrets.
 	s1 := secretsToAttach{
-		imagePullSecretNames: []string{"s1"},
+		imagePullSecretNames:    []string{"s1"},
+		ImageDecryptSecretNames: []string{"d1"},
 		containerEnvSecrets: []envSecrets{
 			{envVarNames: []string{"s1"}, envFromNames: []string{"s10"}},
 			{envVarNames: []string{"s2"}},
@@ -399,7 +405,8 @@ func TestCacheInvalidation(t *testing.T) {
 
 	// Update a pod with a new secret.
 	s2 := secretsToAttach{
-		imagePullSecretNames: []string{"s1"},
+		imagePullSecretNames:    []string{"s1"},
+		ImageDecryptSecretNames: []string{"d1"},
 		containerEnvSecrets: []envSecrets{
 			{envVarNames: []string{"s1"}},
 			{envVarNames: []string{"s2"}, envFromNames: []string{"s20"}},
@@ -412,8 +419,9 @@ func TestCacheInvalidation(t *testing.T) {
 	store.Get("ns1", "s2")
 	store.Get("ns1", "s20")
 	store.Get("ns1", "s3")
+	store.Get("ns1", "d1")
 	actions = fakeClient.Actions()
-	assert.Equal(t, 4, len(actions), "unexpected actions: %#v", actions)
+	assert.Equal(t, 5, len(actions), "unexpected actions: %#v", actions)
 	fakeClient.ClearActions()
 
 	// Create a new pod that is refencing the first three secrets - those should
@@ -424,8 +432,9 @@ func TestCacheInvalidation(t *testing.T) {
 	store.Get("ns1", "s2")
 	store.Get("ns1", "s20")
 	store.Get("ns1", "s3")
+	store.Get("ns1", "d1")
 	actions = fakeClient.Actions()
-	assert.Equal(t, 3, len(actions), "unexpected actions: %#v", actions)
+	assert.Equal(t, 4, len(actions), "unexpected actions: %#v", actions)
 	fakeClient.ClearActions()
 }
 
@@ -471,7 +480,8 @@ func TestCacheRefcounts(t *testing.T) {
 	manager := newCacheBasedSecretManager(store)
 
 	s1 := secretsToAttach{
-		imagePullSecretNames: []string{"s1"},
+		imagePullSecretNames:    []string{"s1"},
+		ImageDecryptSecretNames: []string{"d1"},
 		containerEnvSecrets: []envSecrets{
 			{envVarNames: []string{"s1"}, envFromNames: []string{"s10"}},
 			{envVarNames: []string{"s2"}},
@@ -481,7 +491,8 @@ func TestCacheRefcounts(t *testing.T) {
 	manager.RegisterPod(podWithSecrets("ns1", "name1", s1))
 	manager.RegisterPod(podWithSecrets("ns1", "name2", s1))
 	s2 := secretsToAttach{
-		imagePullSecretNames: []string{"s2"},
+		imagePullSecretNames:    []string{"s2"},
+		ImageDecryptSecretNames: []string{"d2"},
 		containerEnvSecrets: []envSecrets{
 			{envVarNames: []string{"s4"}},
 			{envVarNames: []string{"s5"}, envFromNames: []string{"s50"}},
@@ -492,7 +503,8 @@ func TestCacheRefcounts(t *testing.T) {
 	manager.RegisterPod(podWithSecrets("ns1", "name4", s2))
 	manager.UnregisterPod(podWithSecrets("ns1", "name3", s2))
 	s3 := secretsToAttach{
-		imagePullSecretNames: []string{"s1"},
+		imagePullSecretNames:    []string{"s1"},
+		ImageDecryptSecretNames: []string{"d1"},
 		containerEnvSecrets: []envSecrets{
 			{envVarNames: []string{"s3"}, envFromNames: []string{"s30"}},
 			{envVarNames: []string{"s5"}},
@@ -501,7 +513,8 @@ func TestCacheRefcounts(t *testing.T) {
 	manager.RegisterPod(podWithSecrets("ns1", "name5", s3))
 	manager.RegisterPod(podWithSecrets("ns1", "name6", s3))
 	s4 := secretsToAttach{
-		imagePullSecretNames: []string{"s3"},
+		imagePullSecretNames:    []string{"s3"},
+		ImageDecryptSecretNames: []string{"d1"},
 		containerEnvSecrets: []envSecrets{
 			{envVarNames: []string{"s6"}},
 			{envFromNames: []string{"s60"}},
@@ -536,8 +549,10 @@ func TestCacheRefcounts(t *testing.T) {
 		return item.refCount
 	}
 	assert.Equal(t, 3, refs("ns1", "s1"))
+	assert.Equal(t, 3, refs("ns1", "d1"))
 	assert.Equal(t, 1, refs("ns1", "s10"))
 	assert.Equal(t, 3, refs("ns1", "s2"))
+	assert.Equal(t, 2, refs("ns1", "d2"))
 	assert.Equal(t, 3, refs("ns1", "s3"))
 	assert.Equal(t, 2, refs("ns1", "s30"))
 	assert.Equal(t, 2, refs("ns1", "s4"))
@@ -556,7 +571,8 @@ func TestCacheBasedSecretManager(t *testing.T) {
 
 	// Create a pod with some secrets.
 	s1 := secretsToAttach{
-		imagePullSecretNames: []string{"s1"},
+		imagePullSecretNames:    []string{"s1"},
+		ImageDecryptSecretNames: []string{"d1"},
 		containerEnvSecrets: []envSecrets{
 			{envVarNames: []string{"s1"}},
 			{envVarNames: []string{"s2"}},
@@ -566,7 +582,8 @@ func TestCacheBasedSecretManager(t *testing.T) {
 	manager.RegisterPod(podWithSecrets("ns1", "name1", s1))
 	// Update the pod with a different secrets.
 	s2 := secretsToAttach{
-		imagePullSecretNames: []string{"s1"},
+		imagePullSecretNames:    []string{"s1"},
+		ImageDecryptSecretNames: []string{"d1"},
 		containerEnvSecrets: []envSecrets{
 			{envVarNames: []string{"s3"}},
 			{envVarNames: []string{"s4"}},
@@ -578,7 +595,8 @@ func TestCacheBasedSecretManager(t *testing.T) {
 	manager.RegisterPod(podWithSecrets("ns2", "name2", s2))
 	// Create and delete a pod with some other secrets.
 	s3 := secretsToAttach{
-		imagePullSecretNames: []string{"s5"},
+		imagePullSecretNames:    []string{"s5"},
+		ImageDecryptSecretNames: []string{"d1"},
 		containerEnvSecrets: []envSecrets{
 			{envVarNames: []string{"s6"}},
 			{envFromNames: []string{"s60"}},
@@ -589,9 +607,9 @@ func TestCacheBasedSecretManager(t *testing.T) {
 
 	// We should have only: s1, s3 and s4 secrets in namespaces: ns1 and ns2.
 	for _, ns := range []string{"ns1", "ns2", "ns3"} {
-		for _, secret := range []string{"s1", "s2", "s3", "s4", "s5", "s6", "s20", "s40", "s50"} {
+		for _, secret := range []string{"s1", "s2", "s3", "s4", "s5", "s6", "s20", "s40", "s50", "d1"} {
 			shouldExist :=
-				(secret == "s1" || secret == "s3" || secret == "s4" || secret == "s40") && (ns == "ns1" || ns == "ns2")
+				(secret == "s1" || secret == "s3" || secret == "s4" || secret == "s40" || secret == "d1") && (ns == "ns1" || ns == "ns2")
 			checkObject(t, store, ns, secret, shouldExist)
 		}
 	}

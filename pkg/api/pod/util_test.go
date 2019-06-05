@@ -40,6 +40,8 @@ func TestPodSecrets(t *testing.T) {
 	pod := &api.Pod{
 		Spec: api.PodSpec{
 			Containers: []api.Container{{
+				ImageDecryptSecrets: []api.LocalObjectReference{{
+					Name: "Spec.Containers[*].ImageDecryptSecrets"}},
 				EnvFrom: []api.EnvFromSource{{
 					SecretRef: &api.SecretEnvSource{
 						LocalObjectReference: api.LocalObjectReference{
@@ -52,6 +54,8 @@ func TestPodSecrets(t *testing.T) {
 			ImagePullSecrets: []api.LocalObjectReference{{
 				Name: "Spec.ImagePullSecrets"}},
 			InitContainers: []api.Container{{
+				ImageDecryptSecrets: []api.LocalObjectReference{{
+					Name: "Spec.InitContainers[*].ImageDecryptSecrets"}},
 				EnvFrom: []api.EnvFromSource{{
 					SecretRef: &api.SecretEnvSource{
 						LocalObjectReference: api.LocalObjectReference{
@@ -126,6 +130,8 @@ func TestPodSecrets(t *testing.T) {
 	expectedSecretPaths := sets.NewString(
 		"Spec.Containers[*].EnvFrom[*].SecretRef",
 		"Spec.Containers[*].Env[*].ValueFrom.SecretKeyRef",
+		"Spec.Containers[*].ImageDecryptSecrets",
+		"Spec.InitContainers[*].ImageDecryptSecrets",
 		"Spec.ImagePullSecrets",
 		"Spec.InitContainers[*].EnvFrom[*].SecretRef",
 		"Spec.InitContainers[*].Env[*].ValueFrom.SecretKeyRef",
