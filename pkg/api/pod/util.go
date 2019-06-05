@@ -39,6 +39,15 @@ func VisitPodSecretNames(pod *api.Pod, visitor Visitor) bool {
 			return false
 		}
 	}
+
+	for _, container := range pod.Spec.Containers {
+		for _, reference := range container.ImageDecryptSecrets {
+			if !visitor(reference.Name) {
+				return false
+			}
+		}
+	}
+
 	for i := range pod.Spec.InitContainers {
 		if !visitContainerSecretNames(&pod.Spec.InitContainers[i], visitor) {
 			return false
