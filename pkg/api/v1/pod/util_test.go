@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -204,6 +204,8 @@ func TestPodSecrets(t *testing.T) {
 	pod := &v1.Pod{
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{{
+				ImageDecryptSecrets: []v1.LocalObjectReference{{
+					Name: "Spec.Containers[*].ImageDecryptSecrets"}},
 				EnvFrom: []v1.EnvFromSource{{
 					SecretRef: &v1.SecretEnvSource{
 						LocalObjectReference: v1.LocalObjectReference{
@@ -216,6 +218,8 @@ func TestPodSecrets(t *testing.T) {
 			ImagePullSecrets: []v1.LocalObjectReference{{
 				Name: "Spec.ImagePullSecrets"}},
 			InitContainers: []v1.Container{{
+				ImageDecryptSecrets: []v1.LocalObjectReference{{
+					Name: "Spec.InitContainers[*].ImageDecryptSecrets"}},
 				EnvFrom: []v1.EnvFromSource{{
 					SecretRef: &v1.SecretEnvSource{
 						LocalObjectReference: v1.LocalObjectReference{
@@ -290,6 +294,8 @@ func TestPodSecrets(t *testing.T) {
 	expectedSecretPaths := sets.NewString(
 		"Spec.Containers[*].EnvFrom[*].SecretRef",
 		"Spec.Containers[*].Env[*].ValueFrom.SecretKeyRef",
+		"Spec.Containers[*].ImageDecryptSecrets",
+		"Spec.InitContainers[*].ImageDecryptSecrets",
 		"Spec.ImagePullSecrets",
 		"Spec.InitContainers[*].EnvFrom[*].SecretRef",
 		"Spec.InitContainers[*].Env[*].ValueFrom.SecretKeyRef",

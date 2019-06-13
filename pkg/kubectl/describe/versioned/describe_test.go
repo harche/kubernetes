@@ -2998,21 +2998,28 @@ func TestDescribeServiceAccount(t *testing.T) {
 				Name: "test-local-ref",
 			},
 		},
+		ImageDecryptSecrets: []corev1.ImageDecryptServiceSecret{
+			{
+				Name: "test-decrypt-ref",
+			},
+		},
 	})
 	c := &describeClient{T: t, Namespace: "foo", Interface: fake}
 	d := ServiceAccountDescriber{c}
 	out, err := d.Describe("foo", "bar", describe.DescriberSettings{ShowEvents: true})
+
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	expectedOut := `Name:                bar
-Namespace:           foo
-Labels:              <none>
-Annotations:         <none>
-Image pull secrets:  test-local-ref (not found)
-Mountable secrets:   test-objectref (not found)
-Tokens:              <none>
-Events:              <none>` + "\n"
+	expectedOut := `Name:                   bar
+Namespace:              foo
+Labels:                 <none>
+Annotations:            <none>
+Image decrypt secrets:  test-decrypt-ref (not found)
+Image pull secrets:     test-local-ref (not found)
+Mountable secrets:      test-objectref (not found)
+Tokens:                 <none>
+Events:                 <none>` + "\n"
 	if out != expectedOut {
 		t.Errorf("expected : %q\n but got output:\n %q", expectedOut, out)
 	}

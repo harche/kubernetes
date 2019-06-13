@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -59,8 +59,9 @@ type envSecrets struct {
 }
 
 type secretsToAttach struct {
-	imagePullSecretNames []string
-	containerEnvSecrets  []envSecrets
+	imagePullSecretNames    []string
+	ImageDecryptSecretNames []string
+	containerEnvSecrets     []envSecrets
 }
 
 func podWithSecrets(ns, podName string, toAttach secretsToAttach) *v1.Pod {
@@ -78,6 +79,10 @@ func podWithSecrets(ns, podName string, toAttach secretsToAttach) *v1.Pod {
 	for i, secrets := range toAttach.containerEnvSecrets {
 		container := v1.Container{
 			Name: fmt.Sprintf("container-%d", i),
+		}
+		for _, name := range toAttach.ImageDecryptSecretNames {
+			container.ImageDecryptSecrets = append(container.ImageDecryptSecrets,
+				v1.LocalObjectReference{Name: name})
 		}
 		for _, name := range secrets.envFromNames {
 			envFrom := v1.EnvFromSource{
@@ -114,7 +119,8 @@ func TestCacheBasedSecretManager(t *testing.T) {
 
 	// Create a pod with some secrets.
 	s1 := secretsToAttach{
-		imagePullSecretNames: []string{"s1"},
+		imagePullSecretNames:    []string{"s1"},
+		ImageDecryptSecretNames: []string{"d1"},
 		containerEnvSecrets: []envSecrets{
 			{envVarNames: []string{"s1"}},
 			{envVarNames: []string{"s2"}},
@@ -124,7 +130,8 @@ func TestCacheBasedSecretManager(t *testing.T) {
 	manager.RegisterPod(podWithSecrets("ns1", "name1", s1))
 	// Update the pod with a different secrets.
 	s2 := secretsToAttach{
-		imagePullSecretNames: []string{"s1"},
+		imagePullSecretNames:    []string{"s1"},
+		ImageDecryptSecretNames: []string{"d1"},
 		containerEnvSecrets: []envSecrets{
 			{envVarNames: []string{"s3"}},
 			{envVarNames: []string{"s4"}},
@@ -136,7 +143,8 @@ func TestCacheBasedSecretManager(t *testing.T) {
 	manager.RegisterPod(podWithSecrets("ns2", "name2", s2))
 	// Create and delete a pod with some other secrets.
 	s3 := secretsToAttach{
-		imagePullSecretNames: []string{"s5"},
+		imagePullSecretNames:    []string{"s5"},
+		ImageDecryptSecretNames: []string{"d1"},
 		containerEnvSecrets: []envSecrets{
 			{envVarNames: []string{"s6"}},
 			{envFromNames: []string{"s60"}},
@@ -147,9 +155,9 @@ func TestCacheBasedSecretManager(t *testing.T) {
 
 	// We should have only: s1, s3 and s4 secrets in namespaces: ns1 and ns2.
 	for _, ns := range []string{"ns1", "ns2", "ns3"} {
-		for _, secret := range []string{"s1", "s2", "s3", "s4", "s5", "s6", "s20", "s40", "s50"} {
+		for _, secret := range []string{"s1", "s2", "s3", "s4", "s5", "s6", "s20", "s40", "s50", "d1"} {
 			shouldExist :=
-				(secret == "s1" || secret == "s3" || secret == "s4" || secret == "s40") && (ns == "ns1" || ns == "ns2")
+				(secret == "s1" || secret == "s3" || secret == "s4" || secret == "s40" || secret == "d1") && (ns == "ns1" || ns == "ns2")
 			checkObject(t, store, ns, secret, shouldExist)
 		}
 	}
