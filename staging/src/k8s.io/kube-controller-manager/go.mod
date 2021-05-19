@@ -11,6 +11,7 @@ require (
 )
 
 replace (
+	golang.org/x/sys => golang.org/x/sys v0.0.0-20210225134936-a50acf3fe073
 	k8s.io/api => ../api
 	k8s.io/apimachinery => ../apimachinery
 	k8s.io/apiserver => ../apiserver

@@ -334,7 +334,7 @@ type subsystem interface {
 	// Name returns the name of the subsystem.
 	Name() string
 	// Set the cgroup represented by cgroup.
-	Set(path string, cgroup *libcontainerconfigs.Cgroup) error
+	Set(path string, cgroup *libcontainerconfigs.Resources) error
 	// GetStats returns the statistics associated with the cgroup
 	GetStats(path string, stats *libcontainercgroups.Stats) error
 }

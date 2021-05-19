@@ -19,7 +19,7 @@ require (
 	github.com/stretchr/testify v1.6.1
 	go.uber.org/zap v1.16.0
 	golang.org/x/mod v0.3.1-0.20200828183125-ce943fd02449 // indirect
-	golang.org/x/sys v0.0.0-20210225134936-a50acf3fe073
+	golang.org/x/sys v0.0.0-20210426230700-d19ff857e887
 	golang.org/x/tools v0.1.0 // indirect
 	gotest.tools/v3 v3.0.3 // indirect
 	k8s.io/apimachinery v0.0.0
@@ -29,6 +29,7 @@ require (
 )
 
 replace (
+	golang.org/x/sys => golang.org/x/sys v0.0.0-20210225134936-a50acf3fe073
 	k8s.io/api => ../api
 	k8s.io/apimachinery => ../apimachinery
 	k8s.io/client-go => ../client-go
