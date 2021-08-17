@@ -103,8 +103,8 @@ func New(imageFsInfoProvider ImageFsInfoProvider, rootPath string, cgroupRoots [
 
 	duration := maxHousekeepingInterval
 	housekeepingConfig := manager.HouskeepingConfig{
-		Interval:     &duration,
-		AllowDynamic: pointer.BoolPtr(allowDynamicHousekeeping),
+		DefaultInterval: &duration,
+		AllowDynamic:    pointer.BoolPtr(allowDynamicHousekeeping),
 	}
 
 	// Create the cAdvisor container manager.

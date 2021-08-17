@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/cadvisor/accelerators"
@@ -35,7 +36,7 @@ import (
 	"github.com/google/cadvisor/events"
 	"github.com/google/cadvisor/fs"
 	info "github.com/google/cadvisor/info/v1"
-	"github.com/google/cadvisor/info/v2"
+	v2 "github.com/google/cadvisor/info/v2"
 	"github.com/google/cadvisor/machine"
 	"github.com/google/cadvisor/nvm"
 	"github.com/google/cadvisor/perf"
@@ -141,8 +142,9 @@ type Manager interface {
 
 // Housekeeping configuration for the manager
 type HouskeepingConfig = struct {
-	Interval     *time.Duration
-	AllowDynamic *bool
+	DefaultInterval *time.Duration
+	MaxInterval     *time.Duration
+	AllowDynamic    *bool
 }
 
 // New takes a memory storage and returns a new manager.
@@ -195,7 +197,7 @@ func New(memoryCache *memory.InMemoryCache, sysfs sysfs.SysFs, houskeepingConfig
 		cadvisorContainer:                     selfContainer,
 		inHostNamespace:                       inHostNamespace,
 		startupTime:                           time.Now(),
-		maxHousekeepingInterval:               *houskeepingConfig.Interval,
+		maxHousekeepingInterval:               *houskeepingConfig.MaxInterval,
 		allowDynamicHousekeeping:              *houskeepingConfig.AllowDynamic,
 		includedMetrics:                       includedMetricsSet,
 		containerWatchers:                     []watcher.ContainerWatcher{},
@@ -242,27 +244,28 @@ type namespacedContainerName struct {
 }
 
 type manager struct {
-	containers               map[namespacedContainerName]*containerData
-	containersLock           sync.RWMutex
-	memoryCache              *memory.InMemoryCache
-	fsInfo                   fs.FsInfo
-	sysFs                    sysfs.SysFs
-	machineMu                sync.RWMutex // protects machineInfo
-	machineInfo              info.MachineInfo
-	quitChannels             []chan error
-	cadvisorContainer        string
-	inHostNamespace          bool
-	eventHandler             events.EventManager
-	startupTime              time.Time
-	maxHousekeepingInterval  time.Duration
-	allowDynamicHousekeeping bool
-	includedMetrics          container.MetricSet
-	containerWatchers        []watcher.ContainerWatcher
-	eventsChannel            chan watcher.ContainerEvent
-	collectorHTTPClient      *http.Client
-	nvidiaManager            stats.Manager
-	perfManager              stats.Manager
-	resctrlManager           stats.Manager
+	containers                  map[namespacedContainerName]*containerData
+	containersLock              sync.RWMutex
+	memoryCache                 *memory.InMemoryCache
+	fsInfo                      fs.FsInfo
+	sysFs                       sysfs.SysFs
+	machineMu                   sync.RWMutex // protects machineInfo
+	machineInfo                 info.MachineInfo
+	quitChannels                []chan error
+	cadvisorContainer           string
+	inHostNamespace             bool
+	eventHandler                events.EventManager
+	startupTime                 time.Time
+	defaultHousekeepingInterval time.Duration
+	maxHousekeepingInterval     time.Duration
+	allowDynamicHousekeeping    bool
+	includedMetrics             container.MetricSet
+	containerWatchers           []watcher.ContainerWatcher
+	eventsChannel               chan watcher.ContainerEvent
+	collectorHTTPClient         *http.Client
+	nvidiaManager               stats.Manager
+	perfManager                 stats.Manager
+	resctrlManager              stats.Manager
 	// List of raw container cgroup path prefix whitelist.
 	rawContainerCgroupPathPrefixWhiteList []string
 }
@@ -692,6 +695,10 @@ func (m *manager) GetRequestedContainersInfo(containerName string, options v2.Re
 	for name, data := range containers {
 		info, err := m.containerDataToContainerInfo(data, &query)
 		if err != nil {
+			if err == memory.ErrDataNotFound {
+				klog.Warningf("Error getting data for container %s because of race condition", name)
+				continue
+			}
 			errs.append(name, "containerDataToContainerInfo", err)
 		}
 		containersMap[name] = info
@@ -923,7 +930,7 @@ func (m *manager) createContainerLocked(containerName string, watchSource watche
 	}
 
 	logUsage := *logCadvisorUsage && containerName == m.cadvisorContainer
-	cont, err := newContainerData(containerName, m.memoryCache, handler, logUsage, collectorManager, m.maxHousekeepingInterval, m.allowDynamicHousekeeping, clock.RealClock{})
+	cont, err := newContainerData(containerName, m.memoryCache, handler, logUsage, collectorManager, m.defaultHousekeepingInterval, m.maxHousekeepingInterval, m.allowDynamicHousekeeping, clock.RealClock{})
 	if err != nil {
 		return err
 	}
@@ -1236,6 +1243,24 @@ func (m *manager) watchForNewOoms() error {
 			err = m.eventHandler.AddEvent(newEvent)
 			if err != nil {
 				klog.Errorf("failed to add OOM kill event for %q: %v", oomInstance.ContainerName, err)
+			}
+
+			// Count OOM events for later collection by prometheus
+			request := v2.RequestOptions{
+				IdType: v2.TypeName,
+				Count:  1,
+			}
+			conts, err := m.getRequestedContainers(oomInstance.ContainerName, request)
+			if err != nil {
+				klog.V(2).Infof("failed getting container info for %q: %v", oomInstance.ContainerName, err)
+				continue
+			}
+			if len(conts) != 1 {
+				klog.V(2).Info("Expected the request to match only one container")
+				continue
+			}
+			for _, cont := range conts {
+				atomic.AddUint64(&cont.oomEvents, 1)
 			}
 		}
 	}()
