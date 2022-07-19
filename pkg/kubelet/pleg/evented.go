@@ -99,20 +99,30 @@ func (e *EventedPLEG) watchEventsChannel() {
 		switch event.ContainerEventType {
 		case runtimeapi.ContainerEventType_CONTAINER_STOPPED_EVENT:
 			// e.Relist()
-			time.Sleep(2 * time.Second) // TODO - See why without this delay the pod states are not updated properly
+			// time.Sleep(2 * time.Second) // TODO - See why without this delay the pod states are not updated properly
 
 			e.updatePodStatus(event)
-
 			e.eventChannel <- &PodLifecycleEvent{ID: types.UID(event.PodSandboxMetadata.Uid), Type: ContainerDied, Data: event.ContainerId}
-			// return err
+
+			// podLifecycleEvents := []PodLifecycleEvent{PodLifecycleEvent{ID: types.UID(event.PodSandboxMetadata.Uid), Type: ContainerDied, Data: event.ContainerId}}
+			// e.updateCache(event,
+			// 	[]PodLifecycleEvent{PodLifecycleEvent{ID: types.UID(event.PodSandboxMetadata.Uid), Type: ContainerDied, Data: event.ContainerId}})
+			// stopCh := make(chan struct{})
+			// go wait.Until(func() {
+			// 	e.updateCache(event,
+			// 		[]PodLifecycleEvent{PodLifecycleEvent{ID: types.UID(event.PodSandboxMetadata.Uid), Type: ContainerDied, Data: event.ContainerId}}, stopCh)
+			// },
+			// 	time.Second*1,
+			// 	wait.NeverStop)
+
 			klog.V(2).InfoS("Recieved Container Stopped Event", "CRI container event", event)
 		case runtimeapi.ContainerEventType_CONTAINER_CREATED_EVENT:
 			// e.Relist()
 			time.Sleep(2 * time.Second)
-
 			e.updatePodStatus(event)
-
 			e.eventChannel <- &PodLifecycleEvent{ID: types.UID(event.PodSandboxMetadata.Uid), Type: ContainerChanged, Data: event.ContainerId}
+
+			// e.updateCache(event, []PodLifecycleEvent{&PodLifecycleEvent{ID: types.UID(event.PodSandboxMetadata.Uid), Type: ContainerChanged, Data: event.ContainerId}})
 			klog.V(2).InfoS("Recieved Container Created Event", "CRI container event", event)
 		case runtimeapi.ContainerEventType_CONTAINER_STARTED_EVENT:
 			// e.Relist()
@@ -132,6 +142,136 @@ func (e *EventedPLEG) watchEventsChannel() {
 
 			klog.V(2).InfoS("Recieved Container Deleted Event", "CRI container event", event)
 		}
+	}
+}
+
+func (e *EventedPLEG) getPodStatus(event *runtimeapi.ContainerEventResponse) (status *kubecontainer.PodStatus, err error) {
+
+	podID := types.UID(event.PodSandboxMetadata.Uid)
+	podName := event.PodSandboxMetadata.Name
+	podNamespace := event.PodSandboxMetadata.Namespace
+
+	status, err = e.runtime.GetPodStatus(podID, podName, podNamespace)
+
+	if err != nil {
+		// nolint:logcheck // Not using the result of klog.V inside the
+		// if branch is okay, we just use it to determine whether the
+		// additional "podStatus" key and its value should be added.
+		if klog.V(6).Enabled() {
+			klog.ErrorS(err, "PLEG: Write status", "pod", klog.KRef(podNamespace, podName), "podStatus", status)
+		} else {
+			klog.ErrorS(err, "PLEG: Write status", "pod", klog.KRef(podNamespace, podName))
+		}
+	} else {
+		if klogV := klog.V(6); klogV.Enabled() {
+			klogV.InfoS("PLEG: Write status", "pod", klog.KRef(podNamespace, podName), "podStatus", status)
+		} else {
+			klog.V(4).InfoS("PLEG: Write status", "pod", klog.KRef(podNamespace, podName))
+		}
+		// Preserve the pod IP across cache updates if the new IP is empty.
+		// When a pod is torn down, kubelet may race with PLEG and retrieve
+		// a pod status after network teardown, but the kubernetes API expects
+		// the completed pod's IP to be available after the pod is dead.
+		status.IPs = e.getPodIPs(podID, status)
+	}
+
+	return status, err
+}
+
+func generatePlegStateFromPodStatus(podStatus *kubecontainer.PodStatus, event *runtimeapi.ContainerEventResponse) plegContainerState {
+	if podStatus == nil {
+		// return []runtimeapi.ContainerState{state}
+		return plegContainerNonExistent
+	}
+
+	for _, containerStatus := range podStatus.ContainerStatuses {
+		if containerStatus.ID.ID == event.ContainerId {
+			return convertState(containerStatus.State)
+		}
+	}
+
+	for _, sandboxStatus := range podStatus.SandboxStatuses {
+		if event.ContainerId == sandboxStatus.Id {
+			state := sandboxStatus.GetState()
+			if state == runtimeapi.PodSandboxState_SANDBOX_READY && event.ContainerEventType == runtimeapi.ContainerEventType_CONTAINER_STARTED_EVENT {
+				return plegContainerRunning
+			}
+
+			if state == runtimeapi.PodSandboxState_SANDBOX_NOTREADY && event.ContainerEventType == runtimeapi.ContainerEventType_CONTAINER_STARTED_EVENT {
+				return plegContainerUnknown
+			}
+
+			if state == runtimeapi.PodSandboxState_SANDBOX_NOTREADY && event.ContainerEventType == runtimeapi.ContainerEventType_CONTAINER_STOPPED_EVENT {
+				return plegContainerExited
+			}
+
+			if state == runtimeapi.PodSandboxState_SANDBOX_NOTREADY && event.ContainerEventType == runtimeapi.ContainerEventType_CONTAINER_DELETED_EVENT {
+				return plegContainerNonExistent
+			}
+		}
+	}
+
+	return plegContainerNonExistent
+}
+
+func (e *EventedPLEG) isPodStatusValid(event *runtimeapi.ContainerEventResponse, podStatus *kubecontainer.PodStatus) bool {
+	plegState := generatePlegStateFromPodStatus(podStatus, event)
+
+	if event.ContainerEventType == runtimeapi.ContainerEventType_CONTAINER_STARTED_EVENT {
+		if plegState == plegContainerRunning {
+			return true
+		}
+	}
+
+	if event.ContainerEventType == runtimeapi.ContainerEventType_CONTAINER_STOPPED_EVENT {
+		if plegState == plegContainerExited {
+			return true
+		}
+	}
+
+	if event.ContainerEventType == runtimeapi.ContainerEventType_CONTAINER_DELETED_EVENT {
+		if plegState == plegContainerNonExistent {
+			return true
+		}
+	}
+
+	if event.ContainerEventType == runtimeapi.ContainerEventType_CONTAINER_CREATED_EVENT {
+		if plegState == plegContainerUnknown {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (e *EventedPLEG) updateCache(event *runtimeapi.ContainerEventResponse, podLifeCycleEvents []PodLifecycleEvent, stopCh chan struct{}) {
+
+	timestamp := e.clock.Now()
+
+	podStatus, err := e.getPodStatus(event)
+	if err != nil {
+
+	}
+
+	if e.isPodStatusValid(event, podStatus) {
+		podID := types.UID(event.PodSandboxMetadata.Uid)
+
+		if event.ContainerEventType == runtimeapi.ContainerEventType_CONTAINER_DELETED_EVENT {
+			for _, sandbox := range podStatus.SandboxStatuses {
+				if sandbox.Id == event.ContainerId {
+					e.cache.Delete(podID)
+				}
+			}
+		} else {
+			e.cache.Set(podID, podStatus, err, timestamp)
+		}
+		e.cache.UpdateTime(timestamp)
+
+		for _, podLifeCycleEvent := range podLifeCycleEvents {
+			e.eventChannel <- &podLifeCycleEvent
+		}
+
+		close(stopCh)
 	}
 }
 
