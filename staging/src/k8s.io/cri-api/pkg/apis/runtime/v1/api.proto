@@ -89,6 +89,7 @@ service RuntimeService {
     // Once it returns error, new container log file MUST NOT be created.
     rpc ReopenContainerLog(ReopenContainerLogRequest) returns (ReopenContainerLogResponse) {}
 
+
     // ExecSync runs a command in a container synchronously.
     rpc ExecSync(ExecSyncRequest) returns (ExecSyncResponse) {}
     // Exec prepares a streaming endpoint to execute a command in the container.
@@ -121,7 +122,6 @@ service RuntimeService {
 
     // GetContainerEvents gets container events from the CRI runtime
     rpc  GetContainerEvents(GetEventsRequest) returns (stream ContainerEventResponse) {}
-
 }
 
 // ImageService defines the public APIs for managing images.
@@ -540,6 +540,10 @@ message PodSandboxStatusResponse {
     // debug, e.g. network namespace for linux container based container runtime.
     // It should only be returned non-empty when Verbose is true.
     map<string, string> info = 2;
+    // Container statuses
+    repeated ContainerStatus containers_statuses = 3;
+    // Timestamp at which container and pod statuses were recorded
+    int64 timestamp = 4;
 }
 
 // PodSandboxStateValue is the wrapper of PodSandboxState.
@@ -1589,6 +1593,12 @@ message ContainerEventResponse {
 
     // ID of the sandbox container
     PodSandboxMetadata pod_sandbox_metadata = 4;
+
+    // Sandbox statuses
+    PodSandboxStatus pod_sandbox_status = 5;
+
+    // Container statuses
+    repeated ContainerStatus containers_statuses = 6;
 }
 
 enum ContainerEventType {
