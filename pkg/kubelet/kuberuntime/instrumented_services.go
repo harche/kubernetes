@@ -342,3 +342,12 @@ func (in instrumentedRuntimeService) GetContainerEvents(containerEventsCh chan *
 	recordError(operation, err)
 	return err
 }
+
+func (in instrumentedRuntimeService) GetPodStatus(podUid string) (*runtimeapi.GetPodStatusResponse, error) {
+	const operation = "get_pod_status"
+	defer recordOperation(operation, time.Now())
+
+	ps, err := in.service.GetPodStatus(podUid)
+	recordError(operation, err)
+	return ps, err
+}

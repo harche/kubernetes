@@ -36,7 +36,7 @@ import (
 // cache entries.
 type Cache interface {
 	Get(types.UID) (*PodStatus, error)
-	Set(types.UID, *PodStatus, error, time.Time)
+	Set(types.UID, *PodStatus, error, time.Time) (updated bool)
 	// GetNewerThan is a blocking call that only returns the status
 	// when it is newer than the given time.
 	GetNewerThan(types.UID, time.Time) (*PodStatus, error)
@@ -88,17 +88,28 @@ func (c *cache) Get(id types.UID) (*PodStatus, error) {
 }
 
 func (c *cache) GetNewerThan(id types.UID, minTime time.Time) (*PodStatus, error) {
+	// if _, ok := c.pods[id]; !ok {
+	// 	data := makeDefaultData(id)
+	// 	return data.status, data.err
+	// }
 	ch := c.subscribe(id, minTime)
 	d := <-ch
 	return d.status, d.err
 }
 
 // Set sets the PodStatus for the pod.
-func (c *cache) Set(id types.UID, status *PodStatus, err error, timestamp time.Time) {
+func (c *cache) Set(id types.UID, status *PodStatus, err error, timestamp time.Time) (updated bool) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	defer c.notify(id, timestamp)
-	c.pods[id] = &data{status: status, err: err, modified: timestamp}
+	// Set the value in the cache only if it's not present already
+	// or the timestamp in the cache is older than the current update timestamp
+	if val, ok := c.pods[id]; !ok || val.modified.Before(timestamp) {
+		c.pods[id] = &data{status: status, err: err, modified: timestamp}
+		c.notify(id, timestamp)
+		return true
+	}
+
+	return false
 }
 
 // Delete removes the entry of the pod.
@@ -142,20 +153,14 @@ func (c *cache) get(id types.UID) *data {
 // Otherwise, it returns nil. The caller should acquire the lock.
 func (c *cache) getIfNewerThan(id types.UID, minTime time.Time) *data {
 	d, ok := c.pods[id]
-	globalTimestampIsNewer := (c.timestamp != nil && c.timestamp.After(minTime))
-	if !ok && globalTimestampIsNewer {
-		// Status is not cached, but the global timestamp is newer than
-		// minTime, return the default status.
+	switch {
+	case !ok:
 		return makeDefaultData(id)
-	}
-	if ok && (d.modified.After(minTime) || globalTimestampIsNewer) {
-		// Status is cached, return status if either of the following is true.
-		//   * status was modified after minTime
-		//   * the global timestamp of the cache is newer than minTime.
+	case ok && (d.modified.After(minTime) || (c.timestamp != nil && c.timestamp.After(minTime))):
 		return d
+	default:
+		return nil
 	}
-	// The pod status is not ready.
-	return nil
 }
 
 // notify sends notifications for pod with the given id, if the requirements

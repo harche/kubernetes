@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -1229,5 +1230,38 @@ func (r *remoteRuntimeService) CheckpointContainer(options *runtimeapi.Checkpoin
 }
 
 func (r *remoteRuntimeService) GetContainerEvents(containerEventsCh chan *runtimeapi.ContainerEventResponse) error {
-	return nil
+	if !r.useV1API() {
+		return nil
+	}
+
+	containerEventsStreamingClient, err := r.runtimeClient.GetContainerEvents(context.Background(), &runtimeapi.GetEventsRequest{})
+
+	if err != nil {
+		klog.ErrorS(err, "GetContainerEvents failed to get streaming client")
+		return err
+	}
+
+	for {
+		resp, err := containerEventsStreamingClient.Recv()
+		if err == io.EOF {
+			return err
+		}
+		if err != nil {
+			klog.ErrorS(err, "cannot receive container event")
+			return err
+		}
+		if resp != nil {
+			containerEventsCh <- resp
+			klog.V(4).InfoS("container event received", "resp", resp)
+		}
+	}
+}
+
+func (r *remoteRuntimeService) GetPodStatus(podUid string) (*runtimeapi.GetPodStatusResponse, error) {
+
+	klog.V(10).InfoS("[RemoteRuntimeService] GetPodStatus", "podUid", podUid, "timeout", r.timeout)
+	ctx, cancel := getContextWithTimeout(r.timeout)
+	defer cancel()
+
+	return r.runtimeClient.GetPodStatus(ctx, &runtimeapi.GetPodStatusRequest{PodUid: podUid})
 }

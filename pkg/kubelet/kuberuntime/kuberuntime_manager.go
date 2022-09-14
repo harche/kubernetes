@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	cadvisorapi "github.com/google/cadvisor/info/v1"
@@ -958,9 +960,66 @@ func (m *kubeGenericRuntimeManager) killPodWithSyncResult(pod *v1.Pod, runningPo
 	return
 }
 
+func (m *kubeGenericRuntimeManager) GeneratePodStatus(event *runtimeapi.ContainerEventResponse) (*kubecontainer.PodStatus, error) {
+
+	if len(event.PodSandboxStatuses) < 1 {
+		return nil, fmt.Errorf("no sandbox containers present in the CRI event %v", event)
+	}
+
+	podIPs := m.determinePodSandboxIPs(event.PodSandboxMetadata.Namespace, event.PodSandboxMetadata.Name, event.PodSandboxStatuses[0])
+
+	kubeContainerStatuses := []*kubecontainer.Status{}
+	for _, status := range event.ContainersStatuses {
+		cStatus := toKubeContainerStatus(status, m.runtimeName)
+		if status.State == runtimeapi.ContainerState_CONTAINER_EXITED {
+			// Populate the termination message if needed.
+			annotatedInfo := getContainerInfoFromAnnotations(status.Annotations)
+			// If a container cannot even be started, it certainly does not have logs, so no need to fallbackToLogs.
+			fallbackToLogs := annotatedInfo.TerminationMessagePolicy == v1.TerminationMessageFallbackToLogsOnError &&
+				cStatus.ExitCode != 0 && cStatus.Reason != "ContainerCannotRun"
+			tMessage, checkLogs := getTerminationMessage(status, annotatedInfo.TerminationMessagePath, fallbackToLogs)
+			if checkLogs {
+				tMessage = m.readLastStringFromContainerLogs(status.GetLogPath())
+			}
+			// Enrich the termination message written by the application is not empty
+			if len(tMessage) != 0 {
+				if len(cStatus.Message) != 0 {
+					cStatus.Message += ": "
+				}
+				cStatus.Message += tMessage
+			}
+		}
+		kubeContainerStatuses = append(kubeContainerStatuses, cStatus)
+	}
+
+	sort.Sort(containerStatusByCreated(kubeContainerStatuses))
+
+	return &kubecontainer.PodStatus{
+		ID:                kubetypes.UID(event.PodSandboxMetadata.Uid),
+		Name:              event.PodSandboxMetadata.Name,
+		Namespace:         event.PodSandboxMetadata.Namespace,
+		IPs:               podIPs,
+		SandboxStatuses:   event.PodSandboxStatuses,
+		ContainerStatuses: kubeContainerStatuses,
+	}, nil
+}
+
 // GetPodStatus retrieves the status of the pod, including the
 // information of all containers in the pod that are visible in Runtime.
 func (m *kubeGenericRuntimeManager) GetPodStatus(uid kubetypes.UID, name, namespace string) (*kubecontainer.PodStatus, error) {
+	if utilfeature.DefaultFeatureGate.Enabled(features.EventedPLEG) {
+		// Get the pod status from the CRI runtime
+		ps, err := m.getCRIPodStatus(uid, name, namespace)
+		if err != nil && strings.Contains(fmt.Sprintf("%v", err), "rpc error: code = Unimplemented desc = unknown method GetPodStatus") {
+			// Evented PLEG needs to be enabled in the Kubelet as well as the Runtime
+			klog.V(4).Info("Evented PLEG: Runtime must implement GetPodStatus")
+			// falling through the code path of the Generic PLEG because
+			// an older runtime might have been used.
+		}
+		if err == nil {
+			return ps, err
+		}
+	}
 	// Now we retain restart count of container as a container label. Each time a container
 	// restarts, pod will read the restart count from the registered dead container, increment
 	// it to get the new restart count, and then add a label with the new restart count on
@@ -1034,6 +1093,57 @@ func (m *kubeGenericRuntimeManager) GetPodStatus(uid kubetypes.UID, name, namesp
 		IPs:               podIPs,
 		SandboxStatuses:   sandboxStatuses,
 		ContainerStatuses: containerStatuses,
+	}, nil
+}
+
+func (m *kubeGenericRuntimeManager) getCRIPodStatus(uid kubetypes.UID, name, namespace string) (*kubecontainer.PodStatus, error) {
+	podStatusResponse, err := m.runtimeService.GetPodStatus(string(uid))
+	if err != nil {
+		return nil, err
+	}
+
+	podIPs := []string{}
+
+	for idx, sb := range podStatusResponse.PodSandboxStatuses {
+		if idx == 0 && sb.State == runtimeapi.PodSandboxState_SANDBOX_READY {
+			podIPs = m.determinePodSandboxIPs(namespace, name, sb)
+		}
+	}
+
+	Containerstatuses := []*kubecontainer.Status{}
+	for _, cs := range podStatusResponse.ContainersStatuses {
+
+		cStatus := toKubeContainerStatus(cs, m.runtimeName)
+		if cs.State == runtimeapi.ContainerState_CONTAINER_EXITED {
+			// Populate the termination message if needed.
+			annotatedInfo := getContainerInfoFromAnnotations(cs.Annotations)
+			// If a container cannot even be started, it certainly does not have logs, so no need to fallbackToLogs.
+			fallbackToLogs := annotatedInfo.TerminationMessagePolicy == v1.TerminationMessageFallbackToLogsOnError &&
+				cStatus.ExitCode != 0 && cStatus.Reason != "ContainerCannotRun"
+			tMessage, checkLogs := getTerminationMessage(cs, annotatedInfo.TerminationMessagePath, fallbackToLogs)
+			if checkLogs {
+				tMessage = m.readLastStringFromContainerLogs(cs.GetLogPath())
+			}
+			// Enrich the termination message written by the application is not empty
+			if len(tMessage) != 0 {
+				if len(cStatus.Message) != 0 {
+					cStatus.Message += ": "
+				}
+				cStatus.Message += tMessage
+			}
+		}
+		Containerstatuses = append(Containerstatuses, cStatus)
+
+	}
+
+	return &kubecontainer.PodStatus{
+		ID:                uid,
+		Name:              name,
+		Namespace:         namespace,
+		IPs:               podIPs,
+		SandboxStatuses:   podStatusResponse.PodSandboxStatuses,
+		ContainerStatuses: Containerstatuses,
+		TimeStamp:         time.Unix(podStatusResponse.Timestamp, 0),
 	}, nil
 }
 
