@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/types"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/kubernetes/pkg/features"
 )
 
 // Cache stores the PodStatus for the pods. It represents *all* the visible
@@ -36,7 +38,7 @@ import (
 // cache entries.
 type Cache interface {
 	Get(types.UID) (*PodStatus, error)
-	Set(types.UID, *PodStatus, error, time.Time)
+	Set(types.UID, *PodStatus, error, time.Time) (updated bool)
 	// GetNewerThan is a blocking call that only returns the status
 	// when it is newer than the given time.
 	GetNewerThan(types.UID, time.Time) (*PodStatus, error)
@@ -94,11 +96,27 @@ func (c *cache) GetNewerThan(id types.UID, minTime time.Time) (*PodStatus, error
 }
 
 // Set sets the PodStatus for the pod.
-func (c *cache) Set(id types.UID, status *PodStatus, err error, timestamp time.Time) {
+func (c *cache) Set(id types.UID, status *PodStatus, err error, timestamp time.Time) (updated bool) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	defer c.notify(id, timestamp)
+
+	if utilfeature.DefaultFeatureGate.Enabled(features.EventedPLEG) {
+		// This does not really have to be feature gated, but doing it
+		// out of abundance of caution.
+
+		// Set the value in the cache only if it's not present already
+		// or the timestamp in the cache is older than the current update timestamp
+		if val, ok := c.pods[id]; !ok || val.modified.Before(timestamp) {
+			c.pods[id] = &data{status: status, err: err, modified: timestamp}
+			c.notify(id, timestamp)
+			return true
+		}
+	}
+
 	c.pods[id] = &data{status: status, err: err, modified: timestamp}
+	c.notify(id, timestamp)
+	return false
+
 }
 
 // Delete removes the entry of the pod.
@@ -142,6 +160,32 @@ func (c *cache) get(id types.UID) *data {
 // Otherwise, it returns nil. The caller should acquire the lock.
 func (c *cache) getIfNewerThan(id types.UID, minTime time.Time) *data {
 	d, ok := c.pods[id]
+
+	if utilfeature.DefaultFeatureGate.Enabled(features.EventedPLEG) {
+		// The Evented PLEG will fail following node e2e test without this change,
+		// https://github.com/kubernetes/kubernetes/blob/4569e646ef161c0262d433aed324fec97a525572/test/e2e_node/pod_hostnamefqdn_test.go#L164
+		// This happens because in that test, the Runtime is set to fail at creating the pod.
+		// Which means in Evented PLEG, there won't be any CRI event at all and hence,
+		// when that test tries to delete that Pod, it gets stuck at GetNewerThan call above.
+		// The only reason it works in Generic PLEG is due to the fact that no matter if the pod
+		// have PodLifeCycleEvent or not, everytime relisting happens the global
+		// cache timestamp is updated and this enables the pod worker not get blocked at GetNewerThan
+		// for this test case.
+
+		// This change has been tested only with Generic PLEG (i.e. without Evented PLEG)
+		// and at least in node e2e, no adverse effects were observed. So this does not really
+		// have to be feature gated, but doing it out of abundance of caution.
+
+		switch {
+		case !ok:
+			return makeDefaultData(id)
+		case ok && (d.modified.After(minTime) || (c.timestamp != nil && c.timestamp.After(minTime))):
+			return d
+		default:
+			return nil
+		}
+	}
+
 	globalTimestampIsNewer := (c.timestamp != nil && c.timestamp.After(minTime))
 	if !ok && globalTimestampIsNewer {
 		// Status is not cached, but the global timestamp is newer than

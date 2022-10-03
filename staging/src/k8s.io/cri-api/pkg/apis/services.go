@@ -61,6 +61,8 @@ type ContainerManager interface {
 	CheckpointContainer(options *runtimeapi.CheckpointContainerRequest) error
 	// GetContainerEvents gets container events from the CRI runtime
 	GetContainerEvents(containerEventsCh chan *runtimeapi.ContainerEventResponse) error
+
+	GetPodStatus(podUid string) (*runtimeapi.GetPodStatusResponse, error)
 }
 
 // PodSandboxManager contains methods for operating on PodSandboxes. The methods
