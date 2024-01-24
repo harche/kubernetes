@@ -319,7 +319,7 @@ github.com/golang/protobuf/ptypes/wrappers
 # github.com/google/btree v1.0.1
 ## explicit; go 1.12
 github.com/google/btree
-# github.com/google/cadvisor v0.48.1
+# github.com/google/cadvisor v0.48.1 => github.com/harche/cadvisor v0.48.1-openshift-4.16-1
 ## explicit; go 1.19
 github.com/google/cadvisor/cache/memory
 github.com/google/cadvisor/client/v2
@@ -603,7 +603,7 @@ github.com/onsi/gomega/types
 # github.com/opencontainers/go-digest v1.0.0
 ## explicit; go 1.13
 github.com/opencontainers/go-digest
-# github.com/opencontainers/runc v1.1.10
+# github.com/opencontainers/runc v1.1.11
 ## explicit; go 1.17
 github.com/opencontainers/runc/libcontainer
 github.com/opencontainers/runc/libcontainer/apparmor
@@ -2797,6 +2797,7 @@ sigs.k8s.io/structured-merge-diff/v4/value
 # sigs.k8s.io/yaml v1.3.0
 ## explicit; go 1.12
 sigs.k8s.io/yaml
+# github.com/google/cadvisor => github.com/harche/cadvisor v0.48.1-openshift-4.16-1
 # github.com/onsi/ginkgo/v2 => github.com/openshift/ginkgo/v2 v2.6.1-0.20231031162821-c5e24be53ea7
 # k8s.io/api => ./staging/src/k8s.io/api
 # k8s.io/apiextensions-apiserver => ./staging/src/k8s.io/apiextensions-apiserver
