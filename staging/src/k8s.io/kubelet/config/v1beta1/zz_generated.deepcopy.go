@@ -408,6 +408,11 @@ func (in *KubeletConfiguration) DeepCopyInto(out *KubeletConfiguration) {
 			(*out)[key] = val
 		}
 	}
+	if in.EnableCompressibleReserved != nil {
+		in, out := &in.EnableCompressibleReserved, &out.EnableCompressibleReserved
+		*out = new(bool)
+		**out = **in
+	}
 	if in.EnforceNodeAllocatable != nil {
 		in, out := &in.EnforceNodeAllocatable, &out.EnforceNodeAllocatable
 		*out = make([]string, len(*in))

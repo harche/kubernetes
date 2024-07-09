@@ -162,13 +162,14 @@ type NodeConfig struct {
 }
 
 type NodeAllocatableConfig struct {
-	KubeReservedCgroupName   string
-	SystemReservedCgroupName string
-	ReservedSystemCPUs       cpuset.CPUSet
-	EnforceNodeAllocatable   sets.Set[string]
-	KubeReserved             v1.ResourceList
-	SystemReserved           v1.ResourceList
-	HardEvictionThresholds   []evictionapi.Threshold
+	KubeReservedCgroupName     string
+	SystemReservedCgroupName   string
+	ReservedSystemCPUs         cpuset.CPUSet
+	EnforceNodeAllocatable     sets.Set[string]
+	KubeReserved               v1.ResourceList
+	SystemReserved             v1.ResourceList
+	EnableCompressibleReserved bool
+	HardEvictionThresholds     []evictionapi.Threshold
 }
 
 type Status struct {

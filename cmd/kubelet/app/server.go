@@ -774,6 +774,7 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 		if err != nil {
 			return fmt.Errorf("--system-reserved value failed to parse: %w", err)
 		}
+
 		var hardEvictionThresholds []evictionapi.Threshold
 		// If the user requested to ignore eviction thresholds, then do not set valid values for hardEvictionThresholds here.
 		if !s.ExperimentalNodeAllocatableIgnoreEvictionThreshold {
@@ -828,13 +829,14 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 				KubeletRootDir:        s.RootDirectory,
 				ProtectKernelDefaults: s.ProtectKernelDefaults,
 				NodeAllocatableConfig: cm.NodeAllocatableConfig{
-					KubeReservedCgroupName:   s.KubeReservedCgroup,
-					SystemReservedCgroupName: s.SystemReservedCgroup,
-					EnforceNodeAllocatable:   sets.New(s.EnforceNodeAllocatable...),
-					KubeReserved:             kubeReserved,
-					SystemReserved:           systemReserved,
-					ReservedSystemCPUs:       reservedSystemCPUs,
-					HardEvictionThresholds:   hardEvictionThresholds,
+					KubeReservedCgroupName:     s.KubeReservedCgroup,
+					SystemReservedCgroupName:   s.SystemReservedCgroup,
+					EnforceNodeAllocatable:     sets.New(s.EnforceNodeAllocatable...),
+					KubeReserved:               kubeReserved,
+					SystemReserved:             systemReserved,
+					EnableCompressibleReserved: s.EnableCompressibleReserved,
+					ReservedSystemCPUs:         reservedSystemCPUs,
+					HardEvictionThresholds:     hardEvictionThresholds,
 				},
 				QOSReserved:                             *experimentalQOSReserved,
 				CPUManagerPolicy:                        s.CPUManagerPolicy,

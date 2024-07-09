@@ -62219,6 +62219,13 @@ func schema_k8sio_kubelet_config_v1beta1_KubeletConfiguration(ref common.Referen
 							},
 						},
 					},
+					"enableCompressibleReserved": {
+						SchemaProps: spec.SchemaProps{
+							Description: "A boolean to set compressible resources on reserved cgroups that describe resources reserved for kubernetes system components. Currently only cpu is supported. See http://kubernetes.io/docs/user-guide/compute-resources for more detail. Default: false",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
 					"reservedSystemCPUs": {
 						SchemaProps: spec.SchemaProps{
 							Description: "The reservedSystemCPUs option specifies the CPU list reserved for the host level system threads and kubernetes related threads. This provide a \"static\" CPU list rather than the \"dynamic\" list by systemReserved and kubeReserved. This option does not support systemReservedCgroup or kubeReservedCgroup.",

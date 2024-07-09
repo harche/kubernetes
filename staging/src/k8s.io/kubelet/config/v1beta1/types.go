@@ -644,6 +644,13 @@ type KubeletConfiguration struct {
 	// Default: nil
 	// +optional
 	KubeReserved map[string]string `json:"kubeReserved,omitempty"`
+	// A boolean to set compressible resources on reserved cgroups
+	// that describe resources reserved for kubernetes system components.
+	// Currently only cpu is supported.
+	// See http://kubernetes.io/docs/user-guide/compute-resources for more detail.
+	// Default: false
+	// +optional
+	EnableCompressibleReserved *bool `json:"enableCompressibleReserved,omitempty"`
 	// The reservedSystemCPUs option specifies the CPU list reserved for the host
 	// level system threads and kubernetes related threads. This provide a "static"
 	// CPU list rather than the "dynamic" list by systemReserved and kubeReserved.

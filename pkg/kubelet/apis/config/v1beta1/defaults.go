@@ -283,4 +283,7 @@ func SetDefaults_KubeletConfiguration(obj *kubeletconfigv1beta1.KubeletConfigura
 	if obj.PodLogsDir == "" {
 		obj.PodLogsDir = DefaultPodLogsDir
 	}
+	if obj.EnableCompressibleReserved == nil {
+		obj.EnableCompressibleReserved = utilpointer.Bool(false)
+	}
 }

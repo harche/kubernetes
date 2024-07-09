@@ -381,6 +381,12 @@ type KubeletConfiguration struct {
 	// Currently only cpu, memory and local ephemeral storage for root file system are supported.
 	// See http://kubernetes.io/docs/user-guide/compute-resources for more detail.
 	KubeReserved map[string]string
+	// A boolean to set compressible resources on reserved cgroups
+	// that describe resources reserved for kubernetes system components.
+	// Currently only cpu, memory and local ephemeral storage for root file system are supported.
+	// See http://kubernetes.io/docs/user-guide/compute-resources for more detail.
+	// +optional
+	EnableCompressibleReserved bool
 	// This flag helps kubelet identify absolute name of top level cgroup used to enforce `SystemReserved` compute resource reservation for OS system daemons.
 	// Refer to [Node Allocatable](https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#node-allocatable) doc for more information.
 	SystemReservedCgroup string
