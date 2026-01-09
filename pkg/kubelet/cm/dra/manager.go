@@ -661,6 +661,20 @@ func (m *Manager) unprepareResources(ctx context.Context, podUID types.UID, name
 			if result.GetError() != "" {
 				return fmt.Errorf("NodeUnprepareResources failed for ResourceClaim %s: %s", reqClaim.Name, result.Error)
 			}
+
+			// Process device health from the unprepare response.
+			// This allows plugins to report final device health synchronously,
+			// avoiding race conditions with late-arriving streaming health updates.
+			if len(result.GetDeviceHealth()) > 0 {
+				devices := convertProtoDeviceHealth(result.GetDeviceHealth())
+				if _, err := m.healthInfoCache.updateHealthInfo(driverName, devices); err != nil {
+					logger.Error(err, "Failed to update health info from unprepare response",
+						"driver", driverName, "claim", reqClaim.Name)
+				} else {
+					logger.V(5).Info("Updated device health from unprepare response",
+						"driver", driverName, "claim", reqClaim.Name, "deviceCount", len(devices))
+				}
+			}
 		}
 
 		unfinished := len(claims) - len(response.Claims)
@@ -671,11 +685,10 @@ func (m *Manager) unprepareResources(ctx context.Context, podUID types.UID, name
 
 	// Atomically perform some operations on the claimInfo cache.
 	err := m.cache.withLock(func() error {
-		// TODO(#132978): Re-evaluate this logic to support post-mortem health updates.
-		// As of the initial implementation, we immediately delete the claim info upon
-		// unprepare. This means a late-arriving health update for a terminated pod
-		// will be missed. A future enhancement could be to "tombstone" this entry for
-		// a grace period instead of deleting it.
+		// Note (#132978): Device health is now captured synchronously from the
+		// NodeUnprepareResources response above, so late-arriving streaming health
+		// updates are no longer a concern. Plugins should report final device health
+		// in their unprepare response to ensure it's captured before claim info is deleted.
 
 		// Delete all claimInfos from the cache that have just been unprepared.
 		for _, claimName := range claimNamesMap {
@@ -1003,4 +1016,30 @@ func (m *Manager) HandleWatchResourcesStream(ctx context.Context, stream draheal
 func (m *Manager) Updates() <-chan resourceupdates.Update {
 	// Return the internal channel that HandleWatchResourcesStream writes to.
 	return m.update
+}
+
+// convertProtoDeviceHealth converts proto DeviceHealth messages to state.DeviceHealth.
+// This is used to process health information from NodeUnprepareResources responses.
+func convertProtoDeviceHealth(protoDevices []*drapb.DeviceHealth) []state.DeviceHealth {
+	devices := make([]state.DeviceHealth, 0, len(protoDevices))
+	for _, d := range protoDevices {
+		if d == nil {
+			continue
+		}
+		var health state.DeviceHealthStatus
+		switch d.GetHealth() {
+		case drapb.HealthStatus_HEALTHY:
+			health = state.DeviceHealthStatusHealthy
+		case drapb.HealthStatus_UNHEALTHY:
+			health = state.DeviceHealthStatusUnhealthy
+		default:
+			health = state.DeviceHealthStatusUnknown
+		}
+		devices = append(devices, state.DeviceHealth{
+			PoolName:   d.GetPoolName(),
+			DeviceName: d.GetDeviceName(),
+			Health:     health,
+		})
+	}
+	return devices
 }
