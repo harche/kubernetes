@@ -1860,6 +1860,11 @@ func TestControllerUpdateReconcilePoolWithNameValidation(t *testing.T) {
 // resources through Update does not deadlock. Update must not hold c.mutex
 // while invoking the caller-provided error handler, because Go mutexes are not
 // reentrant and Update is the only public API for replacing the desired state.
+//
+// The handler probes the lock with TryLock before re-entering Update. That
+// turns the bug into a plain assertion failure instead of a hang, without an
+// arbitrary timeout. A synctest bubble does not help here: blocking on a
+// sync.Mutex is not "durably blocked", so synctest never reports the deadlock.
 func TestControllerUpdateErrorHandlerCanReplaceResources(t *testing.T) {
 	const poolName = "pool"
 
@@ -1884,22 +1889,21 @@ func TestControllerUpdateErrorHandlerCanReplaceResources(t *testing.T) {
 
 	// The handler reacts to the rejected input by replacing it with a valid
 	// single-pool set via Update, exactly as the ErrorHandler contract allows.
-	// Before the fix this re-entered c.mutex and deadlocked.
 	var handlerErr error
-	completed := make(chan struct{})
 	ctrl.errorHandler = func(_ context.Context, err error, _ string) {
 		handlerErr = err
+		// Nothing else runs concurrently, so a failed TryLock means the
+		// calling Update still holds the lock and re-entering it would
+		// deadlock. Report that and bail out instead of hanging the test.
+		if !ctrl.mutex.TryLock() {
+			t.Error("ErrorHandler invoked while Controller.mutex is held; replacing resources via Update would deadlock")
+			return
+		}
+		ctrl.mutex.Unlock()
 		ctrl.Update(validResources())
-		close(completed)
 	}
 
-	go ctrl.Update(invalidResources)
-
-	select {
-	case <-completed:
-	case <-time.After(time.Second):
-		t.Fatal("ErrorHandler deadlocked while replacing resources")
-	}
+	ctrl.Update(invalidResources)
 
 	require.Error(t, handlerErr)
 
